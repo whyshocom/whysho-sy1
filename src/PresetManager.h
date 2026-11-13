@@ -26,6 +26,9 @@ struct Bank
 // PUBLIC API IS A CONTRACT with the editor — extend, don't break.
 // Message-thread only. Broadcasts a change whenever banks, the current preset
 // or favourites change.
+// Bank order: 0 = "Factory", 1 = "User", then the other user banks by name.
+// Indices can shift after any call that adds / removes / renames a bank or
+// rescans — re-read them after a change message instead of caching.
 class PresetManager : public juce::ChangeBroadcaster
 {
 public:
@@ -42,6 +45,10 @@ public:
     const Bank& bank (int bankIndex) const;
     void rescan();                                   // re-read user banks from disk
     juce::File userDir() const;                      // <appdata>/Whysho/SY1/Banks
+    // The always-present writable "User" bank (its file appears on first save).
+    int userBankIndex() const;
+    // Files the last scan had to skip, as "file name: reason" (for a browser hint).
+    juce::StringArray scanErrors() const;
 
     // ---- current preset ----
     void load (int bankIndex, int presetIndex);      // applies to the parameters
@@ -61,6 +68,7 @@ public:
     // Becomes the current preset.
     bool savePreset (int bankIndex, const Preset& p);
     bool deletePreset (int bankIndex, int presetIndex);
+    bool renamePreset (int bankIndex, int presetIndex, const juce::String& newName);
 
     // ---- sharing ----
     // Import a *.sy1bank (copied into userDir, name de-duplicated) or a
