@@ -65,9 +65,16 @@
 #include "SynthEngine.h"
 #include "Voice.h"
 #include "Effects.h"
+#include "Diagnostics.h"
 
 namespace wsho::dsp
 {
+std::atomic<int>& guardTrips() noexcept
+{
+    static std::atomic<int> count { 0 };
+    return count;
+}
+
 namespace
 {
 constexpr int kSlots = kMaxVoices + 8;      // spare slots let stolen voices fade out while the new note starts
@@ -471,6 +478,7 @@ struct SynthEngine::Impl
 
         if (! finite (L, R, n))      // should be unreachable; never let it reach the effects' feedback paths
         {
+            guardTrips().fetch_add (1, std::memory_order_relaxed);
             for (auto& v : voices) v.kill();
             std::fill (L, L + n, 0.0f); std::fill (R, R + n, 0.0f);
         }
@@ -486,6 +494,7 @@ struct SynthEngine::Impl
 
         if (! finite (L, R, n))
         {
+            guardTrips().fetch_add (1, std::memory_order_relaxed);
             drive.reset(); chorus.reset(); delay.reset(); reverb.reset(); master.reset();
             std::fill (L, L + n, 0.0f); std::fill (R, R + n, 0.0f);
         }

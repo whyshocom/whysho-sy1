@@ -48,7 +48,7 @@ private:
     {
     public:
         enum class Style { Primary, Secondary, Link };
-        PanelButton (const juce::String& text, Style s) : juce::Button (text), style (s) { setButtonText (text); }
+        PanelButton (const juce::String& label, Style s) : juce::Button (label), style (s) { setButtonText (label); }
         void setStyle (Style s) { if (style != s) { style = s; repaint(); } }
         void paintButton (juce::Graphics&, bool highlighted, bool down) override;
     private:

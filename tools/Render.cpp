@@ -16,6 +16,7 @@
 // ===========================================================================
 #include "PluginProcessor.h"
 #include "dsp/SynthEngine.h"
+#include "dsp/Diagnostics.h"
 #include <juce_dsp/juce_dsp.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <iostream>
@@ -398,9 +399,21 @@ Stats analyse (const Audio& a, const Phrase& ph)
 
     if (! ph.notes.empty())
     {
-        // sustain portion = the back half of the longest note
+        // sustain portion = the back half of the longest note that sounds alone
+        // (a chord has no single fundamental); fall back to the longest note.
+        auto overlaps = [&ph] (const NoteEv& n)
+        {
+            for (auto& o : ph.notes)
+                if (&o != &n && o.start < n.start + n.len && n.start < o.start + o.len) return true;
+            return false;
+        };
         auto longest = ph.notes.front();
-        for (auto& n : ph.notes) if (n.len > longest.len) longest = n;
+        bool haveSolo = false;
+        for (auto& n : ph.notes)
+        {
+            const bool solo = ! overlaps (n);
+            if ((solo && ! haveSolo) || (solo == haveSolo && n.len > longest.len)) { longest = n; haveSolo = solo; }
+        }
         const double t0 = longest.start + 0.4 * longest.len, t1 = longest.start + 0.95 * longest.len;
         const auto mono = a.mono();
         const int i0 = sampleAt (a, t0), i1 = sampleAt (a, t1, i0);
@@ -420,7 +433,7 @@ juce::String statsLine (const Stats& s)
 {
     juce::String t;
     t << "peak " << juce::String (s.peakDb, 2) << " dBFS | rms " << juce::String (s.rmsDb, 2) << " dBFS | dc "
-      << juce::String (s.dc, 5) << " | f0 " << juce::String (s.f0, 2) << " Hz | centroid " << juce::String (s.centroid, 0)
+      << juce::String (s.dc, 5) << " | f0 " << juce::String (s.f0, 2) << " Hz | centroid " << juce::String (juce::roundToInt (s.centroid))
       << " Hz | tail(-60dB) " << (s.tailCut ? ">" : "") << juce::String (s.tail, 3) << " s | voices " << s.maxVoices
       << " | nan/inf " << s.nonFinite << " | " << juce::String (s.speed, 1) << "x realtime";
     return t;
@@ -536,6 +549,13 @@ Phrase phraseForCategory (const juce::String& categoryIn, double bpm)
         add (36, 0.0, 0.25, 120); add (36, 1.0, 0.25, 100); add (48, 2.0, 0.25, 110); add (60, 3.0, 0.25, 110);
         ph.tail = 2.0;
     }
+    else if (c.contains ("synth") || c.contains ("brass") || c.contains ("pulse") || c.contains ("stab"))
+    {
+        for (int n : { 55, 62, 67 }) add (n, 0.0, 0.5, 110);
+        for (int n : { 53, 60, 65 }) add (n, 1.0, 0.5, 100);
+        add (67, 2.0, 1.4); add (70, 3.5, 0.5); add (72, 4.0, 2.0);
+        ph.tail = 3.0;
+    }
     else if (c.contains ("fx") || c.contains ("sfx") || c.contains ("riser"))
     {
         add (60, 0.0, 6.0); ph.tail = 4.0;
@@ -647,7 +667,7 @@ struct TestRun
     }
 };
 
-juce::String num (double v, int dp = 2) { return juce::String (v, dp); }
+juce::String num (double v, int dp = 2) { return dp > 0 ? juce::String (v, dp) : juce::String (juce::roundToInt (v)); }
 
 Phrase oneNote (int note, double len, double tail, int vel = 100)
 {
@@ -673,7 +693,7 @@ void testSilenceAndLevels (TestRun& t)
         p.set (P::drvOn, 1).set (P::choOn, 1).set (P::dlyOn, 1).set (P::revOn, 1).set (P::drvType, dTube);
         Phrase ph; ph.tail = 1.0;
         const auto a = renderEngine (p, ph);
-        t.check (peakOf (a) == 0.0 && a.maxVoices == 0, "no notes -> digital silence (all FX on)", "peak " + num (peakOf (a), 9));
+        t.check (peakOf (a) <= 0.0 && a.maxVoices == 0, "no notes -> digital silence (all FX on)", "peak " + num (peakOf (a), 9));
     }
     {
         const auto a = renderEngine (Patch(), oneNote (60, 1.0, 0.5));
@@ -770,6 +790,88 @@ void testTuning (TestRun& t)
         const double early = yinAt (a, 0.0, 0.03), late = f0At (a, 0.5, 0.95);
         t.check (early > 200.0 && std::abs (cents (late, 110.0)) < 2.0, "pitch envelope sweeps down onto the note",
                  "first 30 ms " + num (early, 1) + " Hz -> " + num (late, 2) + " Hz");
+    }
+}
+
+void testModulation (TestRun& t)
+{
+    t.section ("LFOs / mod matrix");
+    Patch p = cleanPatch (wSine);
+    p.set (P::ampA, 0.001f).set (P::ampR, 0.01f);
+    p.set (P::mod1Src, msLfo1).set (P::mod1Dst, mdLevel).set (P::mod1Amt, 1.0f).set (P::lfo1Wave, lSquare);
+    {
+        // square tremolo, level x (1 +/- 1): on for half a cycle, silent for the other half
+        p.set (P::lfo1Sync, 1).set (P::lfo1Div, 2);      // 1/4 note
+        const auto a = renderEngine (p, oneNote (69, 1.4, 0.1), 48000.0, 512, 120.0);
+        const auto b = renderEngine (p, oneNote (69, 1.4, 0.1), 48000.0, 512, 150.0);
+        const double hi = peakOf (a, 0.05, 0.2), lo = peakOf (a, 0.3, 0.45), hi2 = peakOf (a, 0.55, 0.7);
+        const double fast = peakOf (b, 0.25, 0.35);      // at 150 bpm the cycle is 0.4 s → low half is 0.2..0.4
+        t.check (lo < 0.01 * hi && hi2 > 0.9 * hi && fast < 0.01 * hi, "tempo-synced LFO: 1/4 at 120 bpm = 2 Hz, follows bpm",
+                 "levels " + num (hi, 3) + " / " + num (lo, 4) + " / " + num (hi2, 3));
+    }
+    {
+        p.set (P::lfo1Sync, 0).set (P::lfo1Rate, 2.0f).set (P::lfo1Retrig, 1);
+        Phrase ph;
+        ph.notes = { { 69, 0.0, 0.2, 100 }, { 69, 0.3, 0.3, 100 } };
+        ph.tail = 0.1;
+        const auto retrig = renderEngine (p, ph);
+        p.set (P::lfo1Retrig, 0);
+        const auto freeRun = renderEngine (p, ph);
+        // second note starts at 0.3 s: retriggered LFO is high again, the free-running one is in its low half (0.25..0.5 s)
+        t.check (peakOf (retrig, 0.32, 0.45) > 0.1 && peakOf (freeRun, 0.32, 0.45) < 0.002 && peakOf (freeRun, 0.52, 0.58) > 0.1,
+                 "LFO retrigger on = per-note phase, off = shared free-running phase");
+    }
+    {
+        Patch q = cleanPatch (wSine);
+        q.set (P::mod1Src, msModWheel).set (P::mod1Dst, mdLevel).set (P::mod1Amt, -1.0f);
+        Phrase ph = oneNote (69, 1.0, 0.1);
+        ph.extra.push_back ({ 0.5, juce::MidiMessage::controllerEvent (1, 1, 127) });
+        const auto a = renderEngine (q, ph);
+        t.check (peakOf (a, 0.2, 0.45) > 0.1 && peakOf (a, 0.7, 0.95) < 1.0e-4 && maxSecondDiff (a, 0.45, 0.6) < 0.01,
+                 "mod wheel (CC1) drives the matrix, smoothed");
+    }
+    {
+        Patch q = cleanPatch (wSine);
+        q.set (P::mod1Src, msRandom).set (P::mod1Dst, mdPitch).set (P::mod1Amt, 0.5f);      // up to +/- 6 st per note
+        Phrase ph;
+        for (int i = 0; i < 6; ++i) ph.notes.push_back ({ 69, i * 0.3, 0.25, 100 });
+        ph.tail = 0.1;
+        const auto a = renderEngine (q, ph);
+        double lo = 1.0e9, hi = 0.0;
+        for (int i = 0; i < 6; ++i) { const double f = yinAt (a, i * 0.3 + 0.05, i * 0.3 + 0.2); lo = juce::jmin (lo, f); hi = juce::jmax (hi, f); }
+        t.check (hi / lo > 1.05 && lo > 440.0 / 1.42 && hi < 440.0 * 1.42, "Random source: a new value per note, within +/- amt",
+                 num (lo, 1) + " .. " + num (hi, 1) + " Hz over 6 notes");
+    }
+    {
+        Patch q = cleanPatch (wSaw);
+        q.set (P::fltCutoff, 300).set (P::fltType, fLP24).set (P::mod1Src, msVelocity).set (P::mod1Dst, mdCutoff).set (P::mod1Amt, 0.4f);
+        const double soft = analyse (renderEngine (q, oneNote (48, 0.6, 0.1, 10)), oneNote (48, 0.6, 0.1)).centroid;
+        const double hard = analyse (renderEngine (q, oneNote (48, 0.6, 0.1, 127)), oneNote (48, 0.6, 0.1)).centroid;
+        t.check (hard > 2.0 * soft, "velocity -> cutoff opens the filter", "centroid " + num (soft, 0) + " -> " + num (hard, 0) + " Hz");
+    }
+    {
+        // osc 2 → osc 1 FM adds sidebands; silent modulator (level 0) still modulates
+        Patch q = cleanPatch (wSine);
+        q.set (P::osc2On, 1).set (P::osc2Wave, wSine).set (P::osc2Level, 0.0f).set (P::osc2Semi, 12);
+        const double plain = analyse (renderEngine (q, oneNote (57, 0.6, 0.1)), oneNote (57, 0.6, 0.1)).centroid;
+        q.set (P::oscFm, 0.7f);
+        const auto a = renderEngine (q, oneNote (57, 0.6, 0.1));
+        const double fm = analyse (a, oneNote (57, 0.6, 0.1)).centroid;
+        t.check (fm > 2.0 * plain && std::abs (cents (f0At (a, 0.2, 0.55, 220.0), 220.0)) < 2.0, "FM 2>1 adds harmonics and keeps the pitch",
+                 "centroid " + num (plain, 0) + " -> " + num (fm, 0) + " Hz");
+    }
+    {
+        // shape: pulse width. 50 % has no even harmonics; shape 1 is a ~5 % pulse (strong 2nd harmonic)
+        auto second = [] (float shape)
+        {
+            Patch q = cleanPatch (wSquare);
+            q.set (P::osc1Shape, shape);
+            const auto a = renderEngine (q, oneNote (57, 0.8, 0.1));
+            const auto m = a.mono();
+            return dftMag (m.data() + 9600, 24000, 48000.0, 440.0) / dftMag (m.data() + 9600, 24000, 48000.0, 220.0);
+        };
+        const double h50 = second (0.0f), h5 = second (1.0f);
+        t.check (h50 < 0.01 && h5 > 0.8, "square shape = pulse width (50 % -> 5 %)", "2nd harmonic " + num (h50, 4) + " -> " + num (h5, 3));
     }
 }
 
@@ -1050,7 +1152,7 @@ void testVoiceStealing (TestRun& t)
         p.set (P::ampR, 0.2f);
         dsp::SynthEngine eng;
         const auto a = renderEngine (eng, p, chordPhrase (8, 0.3, 1.5));
-        t.check (a.maxVoices == 8 && a.endVoices == 0 && eng.activeVoices() == 0 && peakOf (a, 1.4, 1.8) == 0.0,
+        t.check (a.maxVoices == 8 && a.endVoices == 0 && eng.activeVoices() == 0 && peakOf (a, 1.4, 1.8) <= 0.0,
                  "release tails end: voices free themselves, output returns to exact silence",
                  "tail " + num (timeToFallBelow (a, 0.3, 0.001), 3) + " s to -60 dBFS for a 0.2 s release");
     }
@@ -1184,6 +1286,7 @@ void testFuzz (TestRun& t, int iterations)
     for (int i = 0; i < 5; ++i) { engines[i] = std::make_unique<dsp::SynthEngine>(); engines[i]->prepare (rates[i], 1024); }
 
     juce::Random rng (20240607);
+    const int tripsBefore = dsp::guardTrips().load();
     juce::int64 samples = 0;
     int bad = 0, over = 0, firstBad = -1;
     double maxPeak = 0.0, cpu = 0.0, audio = 0.0;
@@ -1268,6 +1371,8 @@ void testFuzz (TestRun& t, int iterations)
     }
     t.check (bad == 0, juce::String (iterations) + " random parameter sets x random MIDI, 5 sample rates, 8 block sizes: no NaN / Inf",
              juce::String (samples) + " samples, " + (bad ? "first failure in set " + juce::String (firstBad) : juce::String ("all finite")));
+    t.check (dsp::guardTrips().load() == tripsBefore, "internal NaN safety nets never had to fire",
+             juce::String (dsp::guardTrips().load() - tripsBefore) + " trips");
     t.check (over == 0, "output never exceeds 0 dBFS under fuzzing", "max peak " + num (maxPeak, 4) + ", avg speed " + num (audio / cpu, 1) + "x realtime");
 
     // every engine must still be healthy afterwards
@@ -1292,7 +1397,7 @@ void testFuzz (TestRun& t, int iterations)
         midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 100);
         Patch p;
         eng.process (mono, midi, p.v.data(), 120.0);
-        t.check (mono.getMagnitude (0, 4096) > 0.05f && mono.getMagnitude (0, 100) == 0.0f, "mono bus and blocks larger than prepared are handled");
+        t.check (mono.getMagnitude (0, 4096) > 0.05f && mono.getMagnitude (0, 100) <= 0.0f, "mono bus and blocks larger than prepared are handled");
     }
 }
 
@@ -1332,6 +1437,7 @@ int runSelfTest (bool quick)
     std::cout << "whysho SY1 engine self-test\n";
     testSilenceAndLevels (t);
     testTuning (t);
+    testModulation (t);
     testBlockInvariance (t);
     testAliasing (t);
     testFilter (t);

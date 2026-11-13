@@ -1,4 +1,5 @@
 #include "Voice.h"
+#include "Diagnostics.h"
 
 namespace wsho::dsp
 {
@@ -558,6 +559,7 @@ void Voice::renderChunk (float* outL, float* outR, int n, const Shared& s) noexc
                       + std::abs (ic1[1][0]) + std::abs (ic1[1][1]) + std::abs (ic2[1][0]) + std::abs (ic2[1][1]);
     if (! (probe < 1.0e6f))
     {
+        guardTrips().fetch_add (1, std::memory_order_relaxed);
         resetFilter();
         for (int i = 0; i < n; ++i) mixL[i] = mixR[i] = 0.0f;
     }
