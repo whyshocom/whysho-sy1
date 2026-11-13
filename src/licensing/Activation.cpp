@@ -1,4 +1,5 @@
 #include "Activation.h"
+#include "Http.h"
 #include "MachineId.h"
 #include "ObfString.h"
 
@@ -13,20 +14,31 @@ juce::String ActivationClient::serverBase() const
     return WSHO_JS ("https://license.whysho.com");
 }
 
-static juce::var postJson (const juce::String& url, const juce::var& body, int& statusCode)
+ActivationClient::ActivationClient() : canceller (std::make_shared<http::Canceller>()) {}
+
+void ActivationClient::beginAbort() { canceller->beginAbort(); }
+void ActivationClient::endAbort()   { canceller->endAbort(); }
+
+static juce::var postJson (const juce::String& url, const juce::var& body, int& statusCode, http::Canceller* canceller)
 {
-    const juce::String json = juce::JSON::toString (body, true);
-    juce::URL u (url);
-    u = u.withPOSTData (json);
+    const auto r = http::request ("POST", url, juce::JSON::toString (body, true), {}, canceller, 6000);
+    statusCode = r.status;   // -1 when the server could not be reached
+    return r.json;
+}
 
-    auto opts = juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inPostData)
-                    .withExtraHeaders ("Content-Type: application/json\r\nAccept: application/json")
-                    .withConnectionTimeoutMs (6000)
-                    .withStatusCode (&statusCode);
+// The server answers errors as { error: <code>, message: <text> }.
+static juce::String activationError (const juce::var& resp, int status)
+{
+    const auto code = resp.getProperty ("error", "").toString();
+    if (code == "wrong-product") return "This license server doesn't issue SY1 licenses yet.";
+    if (code == "unknown-key")   return "That license key wasn't found. Check it and try again.";
+    if (code == "seat-limit")    return "This key is already active on its maximum number of computers.";
+    if (code == "revoked")       return "This license has been revoked.";
+    if (code == "expired")       return "This license has expired.";
 
-    std::unique_ptr<juce::InputStream> stream (u.createInputStream (opts));
-    if (stream == nullptr) { statusCode = -1; return {}; }
-    return juce::JSON::parse (stream->readEntireStreamAsString());
+    const auto message = resp.getProperty ("message", "").toString();
+    if (message.isNotEmpty()) return message;
+    return "Activation failed (HTTP " + juce::String (status) + ").";
 }
 
 ActivationClient::Result ActivationClient::activate (const juce::String& licenseKey)
@@ -38,12 +50,12 @@ ActivationClient::Result ActivationClient::activate (const juce::String& license
     body->setProperty ("productId", juce::String (WSHO_JS ("whysho-sy1")));
 
     int status = 0;
-    auto resp = postJson (serverBase() + WSHO_JS ("/api/activate"), juce::var (body.get()), status);
+    auto resp = postJson (serverBase() + WSHO_JS ("/api/activate"), juce::var (body.get()), status, canceller.get());
 
     if (status == -1) { r.error = "Could not reach the activation server. Check your connection."; return r; }
     if (status != 200)
     {
-        r.error = resp.getProperty ("error", "Activation failed (HTTP " + juce::String (status) + ").").toString();
+        r.error = activationError (resp, status);
         return r;
     }
     r.token = resp.getProperty ("token", "").toString();
@@ -58,7 +70,7 @@ bool ActivationClient::deactivate (const juce::String& licenseKey)
     body->setProperty ("licenseKey", licenseKey.trim());
     body->setProperty ("machineId", getMachineId());
     int status = 0;
-    postJson (serverBase() + WSHO_JS ("/api/deactivate"), juce::var (body.get()), status);
+    postJson (serverBase() + WSHO_JS ("/api/deactivate"), juce::var (body.get()), status, canceller.get());
     return status == 200;
 }
 
@@ -67,7 +79,7 @@ bool ActivationClient::validateOnline (const juce::String& token)
     juce::DynamicObject::Ptr body = new juce::DynamicObject();
     body->setProperty ("token", token);
     int status = 0;
-    auto resp = postJson (serverBase() + WSHO_JS ("/api/validate"), juce::var (body.get()), status);
+    auto resp = postJson (serverBase() + WSHO_JS ("/api/validate"), juce::var (body.get()), status, canceller.get());
     if (status != 200) return true; // network issue -> don't punish the user (offline grace)
     return (bool) resp.getProperty ("valid", true);
 }
