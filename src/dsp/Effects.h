@@ -7,6 +7,10 @@
 // stops costing CPU once fully faded out.
 namespace wsho::dsp
 {
+// Shared on / off behaviour: `toggledOff` remembers that the effect went idle
+// because the user switched it off, so switching it back on fades in. After
+// prepare() / reset() an effect that is already on starts at full strength —
+// the first transient of a patch must not sneak past a fading-in drive.
 struct OnePole     // per-sample parameter smoother
 {
     float z = 0.0f, c = 1.0f;
@@ -39,7 +43,7 @@ public:
 private:
     float  sampleRate = 48000.0f;
     OnePole mixS, gainS, compS;
-    bool   idle = true;
+    bool   idle = true, toggledOff = false;
     int    lastType = -1;
     double x1[2] {}, f1[2] {};
     float  dcX[2] {}, dcY[2] {}, dcCoef = 0.999f;
@@ -55,7 +59,7 @@ public:
 private:
     float sampleRate = 48000.0f, phase = 0.0f;
     OnePole mixS, depthS, inS;
-    bool idle = true;
+    bool idle = true, toggledOff = false;
     DelayLine line[2];
 };
 
@@ -68,7 +72,7 @@ public:
 private:
     float sampleRate = 48000.0f;
     OnePole mixS, fbS, pingS, inS;
-    bool idle = true, timeValid = false, xfActive = false;
+    bool idle = true, toggledOff = false, timeValid = false, xfActive = false;
     float dCur = 2.0f, dNext = 2.0f, xf = 0.0f, xfStep = 0.001f;   // time changes cross-fade between two taps
     DelayLine line[2];
     float lp[2] {}, hp[2] {}, lpCoef = 0.5f, hpCoef = 0.01f;
@@ -84,7 +88,7 @@ private:
     static constexpr int kLines = 8, kAp = 3;
     float sampleRate = 48000.0f;
     OnePole mixS, inS;
-    bool idle = true;
+    bool idle = true, toggledOff = false;
     DelayLine line[kLines], ap[2][kAp];
     int   len[kLines] {}, apLen[2][kAp] {};
     float lpState[kLines] {}, gain[kLines] {}, modPhase[kLines] {}, modInc[kLines] {}, modDepth = 0.0f;

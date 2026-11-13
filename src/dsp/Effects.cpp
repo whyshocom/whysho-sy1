@@ -92,7 +92,7 @@ void Drive::prepare (double sr)
 void Drive::reset() noexcept
 {
     mixS.snap (0.0f);
-    idle = true;
+    idle = true; toggledOff = false;
     lastType = -1;
     for (int c = 0; c < 2; ++c) { x1[c] = f1[c] = 0.0; dcX[c] = dcY[c] = held[c] = 0.0f; }
     crushPhase = 1.0f;
@@ -100,7 +100,7 @@ void Drive::reset() noexcept
 
 void Drive::process (float* l, float* r, int n, bool on, int type, float amt, float mix) noexcept
 {
-    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
+    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); toggledOff = true; return; }
 
     const float gTarget = type == dFold ? 1.0f + 7.0f * amt : (type == dCrush ? 1.0f : std::pow (10.0f, 1.5f * amt));
     // Loudness compensation: keep a nominal -12 dBFS peak at about the level it came in.
@@ -113,16 +113,16 @@ void Drive::process (float* l, float* r, int n, bool on, int type, float amt, fl
         if (type == dFold)
         {
             const float shaped = std::sin (0.5f * kPi * std::min (1.0f, x));
-            compTarget = ref / shaped * (1.0f - 0.3f * clampf ((x - 0.6f) * 1.25f, 0.0f, 1.0f));
+            compTarget = ref / shaped * (1.0f - 0.5f * clampf ((x - 0.6f) * 1.25f, 0.0f, 1.0f));
         }
         else
         {
             const float shaped = 0.5f * (float) (std::abs (shapeF (type, (double) x)) + std::abs (shapeF (type, (double) -x)));
             const float squash = 1.0f - shaped / x;      // 0 = linear, → 1 = fully clipped
-            compTarget = ref / std::max (0.05f, shaped) * (1.0f - 0.45f * squash);
+            compTarget = ref / std::max (0.05f, shaped) * (1.0f - 0.6f * squash);
         }
     }
-    if (idle) { gainS.snap (gTarget); compS.snap (compTarget); idle = false; }
+    if (idle) { gainS.snap (gTarget); compS.snap (compTarget); if (! toggledOff) mixS.snap (mix); idle = false; }
     if (type != lastType)
     {
         for (int c = 0; c < 2; ++c) f1[c] = shapeAD (type, x1[c]);
@@ -194,15 +194,21 @@ void Chorus::reset() noexcept
 {
     for (auto& d : line) d.clear();
     mixS.snap (0.0f);
-    idle = true;
+    idle = true; toggledOff = false;
 }
 
 void Chorus::process (float* l, float* r, int n, bool on, float rateHz, float depth, float mix) noexcept
 {
-    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
+    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); toggledOff = true; return; }
     // Feeding a delay line from mid-waveform puts a step into it that plays
     // back later: the input is faded as well as the mix.
-    if (idle) { depthS.snap (depth); inS.snap (0.0f); idle = false; }
+    if (idle)
+    {
+        depthS.snap (depth);
+        inS.snap (toggledOff ? 0.0f : 1.0f);
+        if (! toggledOff) mixS.snap (mix);
+        idle = false;
+    }
 
     const float mixTarget = on ? mix : 0.0f, inTarget = on ? 1.0f : 0.0f;
     const float inc = rateHz / sampleRate;
@@ -250,19 +256,21 @@ void Delay::reset() noexcept
     for (auto& d : line) d.clear();
     for (int c = 0; c < 2; ++c) lp[c] = hp[c] = 0.0f;
     mixS.snap (0.0f);
-    idle = true;
+    idle = true; toggledOff = false;
     timeValid = false;
 }
 
 void Delay::process (float* l, float* r, int n, bool on, float seconds, float feedback, bool pingPong, float mix) noexcept
 {
-    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
+    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); toggledOff = true; return; }
 
     const float target = clampf (seconds * sampleRate, 2.0f, (float) (line[0].capacity() - 8));
     if (! timeValid)
     {
         dCur = dNext = target; xfActive = false;
-        fbS.snap (feedback); pingS.snap (pingPong ? 1.0f : 0.0f); inS.snap (0.0f);
+        fbS.snap (feedback); pingS.snap (pingPong ? 1.0f : 0.0f);
+        inS.snap (toggledOff ? 0.0f : 1.0f);
+        if (! toggledOff) mixS.snap (mix);
         timeValid = true;
     }
     idle = false;
@@ -345,13 +353,18 @@ void Reverb::reset() noexcept
     for (auto& v : lpState) v = 0.0f;
     inHp[0] = inHp[1] = 0.0f;
     mixS.snap (0.0f);
-    idle = true;
+    idle = true; toggledOff = false;
 }
 
 void Reverb::process (float* l, float* r, int n, bool on, float size, float damp, float mix) noexcept
 {
-    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
-    if (idle) { inS.snap (0.0f); idle = false; }
+    if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); toggledOff = true; return; }
+    if (idle)
+    {
+        inS.snap (toggledOff ? 0.0f : 1.0f);
+        if (! toggledOff) mixS.snap (mix);
+        idle = false;
+    }
 
     if (differs (size, lastSize))
     {

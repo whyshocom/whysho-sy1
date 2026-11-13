@@ -931,7 +931,7 @@ void testEnvelopes (TestRun& t)
     const double tAtk = timeToReach (a, 0.0, pk, 0.985);
     const double sus = peakOf (a, 1.3, 1.5);
     const double tRel = timeToReach (a, 1.5, sus, 0.001, true);
-    const double tDec = timeToReach (a, 0.1, pk * 0.5, 1.0 + 0.5 * 0.0316, true);      // decay 30 dB of the way = half the time
+    const double tDec = timeToReach (a, 0.1, pk * 0.5, 1.0 + 0.0316, true);      // decay 30 dB of the way = half the time
     t.check (std::abs (tAtk - 0.1) < 0.012, "attack time", num (tAtk * 1000.0, 1) + " ms for 100 ms");
     t.check (std::abs (sus / pk - 0.5) < 0.01, "sustain level", num (sus / pk, 3) + " for 0.5");
     t.check (std::abs (tDec - 0.15) < 0.02, "decay rate (-60 dB over the decay time)", num (tDec * 1000.0, 1) + " ms to -30 dB for a 300 ms decay");

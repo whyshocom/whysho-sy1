@@ -11,11 +11,12 @@
 
 namespace wsho
 {
-class WhyshoSynthAudioProcessor : public juce::AudioProcessor
+class WhyshoSynthAudioProcessor : public juce::AudioProcessor,
+                                  private juce::Timer
 {
 public:
     WhyshoSynthAudioProcessor();
-    ~WhyshoSynthAudioProcessor() override = default;
+    ~WhyshoSynthAudioProcessor() override { stopTimer(); }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -61,6 +62,10 @@ public:
     lic::LicenseInfo licenseInfo;
 
 private:
+    // Picks up a purchase / revoke / trial expiry found by the background
+    // account re-check without the user reopening the dialog.
+    void timerCallback() override { refreshLicense(); }
+
     juce::AudioProcessorValueTreeState apvts;
     PresetManager presets { apvts };
     dsp::SynthEngine engine;
@@ -77,6 +82,7 @@ private:
     lic::ActivationClient activation;
     lic::AccountClient    account;
     lic::Guard            guard;
+    std::atomic<bool>     usable { false };   // audio-thread view of licenseInfo
     int blockCounter = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WhyshoSynthAudioProcessor)

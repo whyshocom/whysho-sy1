@@ -10,12 +10,14 @@ WhyshoSynthAudioProcessor::WhyshoSynthAudioProcessor()
     for (int i = 0; i < kNumParams; ++i)
         raw[(size_t) i] = apvts.getRawParameterValue (pid (i));
     refreshLicense();
+    startTimer (60 * 1000);
 }
 
 void WhyshoSynthAudioProcessor::refreshLicense()
 {
     licenseInfo = lic::resolveLicense (licMgr, account);
-    guard.setLicensed (licenseInfo.isUsable());
+    usable.store (licenseInfo.isUsable());
+    guard.setLicensed (usable.load());
 }
 
 bool WhyshoSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& l) const
@@ -50,7 +52,7 @@ void WhyshoSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
 
     // licensing gate (deterrent degradation when unlicensed)
     guard.applyDegradation (buffer);
-    if (++blockCounter >= 500) { blockCounter = 0; guard.setLicensed (licenseInfo.isUsable()); }
+    if (++blockCounter >= 500) { blockCounter = 0; guard.setLicensed (usable.load (std::memory_order_relaxed)); }
 
     // scope + meters
     const float* l = buffer.getReadPointer (0);

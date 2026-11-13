@@ -5,7 +5,7 @@ namespace wsho::dsp
 namespace
 {
 // One default note (saw, level 0.8, velocity 100, vel sens 0.5) peaks ≈ -12 dBFS.
-constexpr float kVoiceGain = 0.50f;
+constexpr float kVoiceGain = 0.45f;
 constexpr float kStage2K   = 1.0f / 0.5412f;      // 2nd section of a 4-pole Butterworth
 constexpr float kMinK      = 0.025f;              // Q = 40 at resonance 1.0: rings, never self-destructs
 constexpr float kFmMaxCycles = 1.0f;              // osc_fm = 1 → phase-mod index 2*pi
