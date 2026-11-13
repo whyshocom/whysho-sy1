@@ -25,6 +25,7 @@ public:
     }
 
     void setOpen (bool o) { if (open != o) { open = o; repaint(); } }
+    void read (TopBar::Readout& r) const { r.kicker = kicker; r.name = name; r.index = index; r.edited = modified; }
 
     void paint (juce::Graphics& g) override
     {
@@ -119,6 +120,7 @@ public:
         text = t; dot = c;
         repaint();
     }
+    const juce::String& shownText() const { return text; }
 
     void paintButton (juce::Graphics& g, bool over, bool down) override
     {
@@ -177,6 +179,16 @@ TopBar::TopBar (WhyshoSynthAudioProcessor& p) : proc (p), meter (p)
 TopBar::~TopBar() = default;
 
 void TopBar::setBrowserOpen (bool o) { preset->setOpen (o); }
+
+TopBar::Readout TopBar::readout() const
+{
+    Readout r;
+    preset->read (r);
+    r.license = license->shownText();
+    return r;
+}
+
+juce::Component& TopBar::presetDisplay() { return *preset; }
 
 void TopBar::setThemeSelection (int index)
 {

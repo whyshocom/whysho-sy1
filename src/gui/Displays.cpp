@@ -9,8 +9,26 @@ constexpr float kTwoPi = juce::MathConstants<float>::twoPi;
 
 float frac (float x) { return x - std::floor (x); }
 
-// Triangle wavefolder: identity inside ±1, reflects beyond.
+// ---- The engine's oscillator maths (dsp/Voice.cpp, dsp/Tables.cpp), without band-limiting ----
+// Triangle wavefolder (dsp::foldTri): identity inside ±1, reflects beyond.
 float fold (float x) { return 1.0f - 4.0f * std::abs (frac (x * 0.25f + 0.25f) - 0.5f); }
+
+// Wavetable phases: saw = 0 at phase 0, rising, step at 0.5; triangle = 0 at phase 0, peak at 0.25.
+float sawTable (float ph) { return 2.0f * frac (ph + 0.5f) - 1.0f; }
+float triTable (float ph) { return 1.0f - 4.0f * std::abs (frac (ph + 0.25f) - 0.5f); }
+
+// Shape on Saw / Triangle / Sine: drive x1 (0) -> x5 (1) into the folder, corners rounded.
+float foldShape (float raw, float shape)
+{
+    if (shape <= 0.001f) return raw;
+    const float v = fold (raw * (1.0f + 4.0f * shape));
+    return v + 0.5f * juce::jmin (1.0f, shape * 8.0f) * (v - v * v * v);
+}
+
+// The 7 detuned saws of the SuperSaw and their mono weight ((L + R) / 2 / sqrt (7)).
+constexpr float kSsOffsets[7] = { -0.11002313f, -0.06288439f, -0.01952356f, 0.0f, 0.01991221f, 0.06216538f, 0.10745242f };
+constexpr float kSsWeight[7]  = { 0.925f, 0.925f, 0.925f, 1.0f, 0.925f, 0.925f, 0.925f };
+constexpr float kSsNorm = 0.37796447f;
 
 // Cheap deterministic noise so previews don't shimmer between repaints.
 float hash (int i)
@@ -50,22 +68,30 @@ void sineIcon (juce::Graphics& g, juce::Rectangle<float> r)
 float oscWaveValue (int wave, float phase, float shape)
 {
     const float ph = frac (phase);
-    const float drive = 1.0f + 3.0f * shape;
+    shape = juce::jlimit (0.0f, 1.0f, shape);
     switch (wave)
     {
-        case wSaw:      return fold ((2.0f * ph - 1.0f) * drive);
-        case wSquare:   return ph < 0.5f + 0.45f * shape ? 1.0f : -1.0f;
-        case wTriangle: return fold ((1.0f - 4.0f * std::abs (ph - 0.5f)) * drive);
-        case wSine:     return fold (std::sin (ph * kTwoPi) * drive);
+        case wSaw:      return foldShape (sawTable (ph), shape);
+        case wTriangle: return foldShape (triTable (ph), shape);
+        case wSine:     return foldShape (std::sin (ph * kTwoPi), shape);
+        case wSquare:
+        {
+            // Two saws, `off` apart: a zero-mean pulse, width 50 % (shape 0) -> 5 % (shape 1).
+            // The engine's pulse swings -2*off .. 2 - 2*off; drawn normalised to full height.
+            const float off = 0.5f + 0.45f * shape;
+            return (sawTable (ph) - sawTable (ph + off)) / (2.0f * off);
+        }
         case wSuperSaw:
         {
-            static const float off[] = { -0.11f, -0.063f, -0.02f, 0.0f, 0.02f, 0.063f, 0.11f };
+            // Detune spread: +-15 ct (shape 0) -> +-1.8 st (shape 1), quadratic. The engine
+            // starts each saw at a random phase; the preview uses fixed ones so it stands still.
+            const float d = 0.08f + 0.92f * shape * shape;
             float sum = 0.0f;
             for (int k = 0; k < 7; ++k)
-                sum += 2.0f * frac (phase * (1.0f + off[k] * (0.15f + 2.2f * shape)) + (float) k * 0.137f) - 1.0f;
-            return sum * (1.0f / 3.2f);
+                sum += kSsWeight[k] * sawTable (phase * (1.0f + kSsOffsets[k] * d) + (float) k * 0.137f);
+            return sum * kSsNorm * 0.85f;
         }
-        default:        return hash ((int) (phase * 40.0f)) * 0.9f;
+        default:        return hash ((int) (phase * 40.0f)) * 0.9f;     // white; WavePreview draws the coloured noise
     }
 }
 
@@ -206,10 +232,23 @@ void WavePreview::paint (juce::Graphics& g)
 
     juce::Path p;
     const int n = juce::jmax (8, (int) (r.getWidth() * 2.0f));
+
+    // Noise colour, as in the engine: white through a one-pole low-pass whose cutoff
+    // falls from open (shape 0) to ~150 Hz (shape 1), renormalised to constant RMS.
+    // One point = one sample at 48 kHz, so darker noise visibly wanders more slowly.
+    const float nc = shape <= 0.0f ? 1.0f : 1.0f - std::exp (-kTwoPi * 20000.0f * std::exp2 (-7.0f * shape) / 48000.0f);
+    const float nNorm = std::sqrt ((2.0f - nc) / nc) * 0.55f;
+    float nLp = 0.0f;
+    if (wave == wNoise)
+        for (int i = -600; i < 0; ++i) nLp += nc * (hash (i) - nLp);        // settle the filter
+
     for (int i = 0; i <= n; ++i)
     {
         const float x = (float) i / (float) n;
-        const float y = juce::jlimit (-1.0f, 1.0f, oscWaveValue (wave, x * cycles * 0.9999f, shape));
+        float y;
+        if (wave == wNoise) { nLp += nc * (hash (i) - nLp); y = nLp * nNorm; }
+        else                y = oscWaveValue (wave, x * cycles * 0.9999f, shape);
+        y = juce::jlimit (-1.0f, 1.0f, y);
         const juce::Point<float> q (r.getX() + x * r.getWidth(), r.getCentreY() - y * r.getHeight() * 0.5f);
         if (i == 0) p.startNewSubPath (q); else p.lineTo (q);
     }
@@ -246,7 +285,7 @@ void LfoPreview::paint (juce::Graphics& g)
 // ===========================================================================
 namespace
 {
-constexpr float kMinHz = 20.0f, kMaxHz = 20000.0f, kTopDb = 20.0f, kBotDb = -44.0f;
+constexpr float kMinHz = 20.0f, kMaxHz = 20000.0f, kTopDb = 28.0f, kBotDb = -44.0f;   // Q 40 peaks at about +23 dB
 }
 
 FilterDisplay::FilterDisplay (APVTS& s)
@@ -268,25 +307,33 @@ float FilterDisplay::xForHz (float hz) const
     return r.getX() + r.getWidth() * std::log (juce::jlimit (kMinHz, kMaxHz, hz) / kMinHz) / std::log (kMaxHz / kMinHz);
 }
 
+// Small-signal magnitude of the engine's filter (dsp/Voice.cpp: runFilter + the
+// coefficient mapping in Voice::control): a state-variable filter with damping
+// k = 1/Q, where resonance 0..1 maps exponentially from Q 0.71 (1.31 for the first
+// stage of the 24 dB types) to Q 40, the input is attenuated by kRel^(1/4) (up to
+// -9 dB) as resonance rises, and the 24 dB types add a fixed Q 0.54 second stage.
 float FilterDisplay::responseDb (float hz) const
 {
     const int type = juce::roundToInt (val (0));
     const float w = hz / juce::jmax (1.0f, val (1));
-    const float q = 0.5f * std::pow (36.0f, val (2));           // 0.5 … 18
     const float w2 = w * w;
-    const auto den = [w, w2] (float qq) { return std::sqrt ((1.0f - w2) * (1.0f - w2) + (w / qq) * (w / qq)); };
+    const bool twoStage = type == fLP24 || type == fHP24;
+    const float kMax = twoStage ? 0.7654f : 1.4142f, kMin = 0.025f, k2 = 1.0f / 0.5412f;
+    const float kRel = std::pow (kMin / kMax, juce::jlimit (0.0f, 1.0f, val (2)));
+    const float k = kMax * kRel;
+    const auto den = [w, w2] (float kk) { return std::sqrt ((1.0f - w2) * (1.0f - w2) + (kk * w) * (kk * w)); };
 
     float mag = 1.0f;
     switch (type)
     {
-        case fLP24:  mag = 1.0f / (den (q) * den (0.707f)); break;
-        case fLP12:  mag = 1.0f / den (q); break;
-        case fBP12:  mag = (w / q) / den (q) * juce::jmax (1.0f, std::sqrt (q)); break;
-        case fHP12:  mag = w2 / den (q); break;
-        case fHP24:  mag = w2 * w2 / (den (q) * den (0.707f)); break;
-        default:     mag = std::abs (1.0f - w2) / den (juce::jmax (0.6f, q)); break;
+        case fLP24:  mag = 1.0f / (den (k) * den (k2)); break;
+        case fLP12:  mag = 1.0f / den (k); break;
+        case fBP12:  mag = 1.19f * std::sqrt (k) * w / den (k); break;
+        case fHP12:  mag = w2 / den (k); break;
+        case fHP24:  mag = w2 * w2 / (den (k) * den (k2)); break;
+        default:     mag = std::abs (1.0f - w2) / den (k); break;      // notch
     }
-    return juce::Decibels::gainToDecibels (mag, -120.0f);
+    return juce::Decibels::gainToDecibels (mag * std::sqrt (std::sqrt (kRel)), -120.0f);
 }
 
 void FilterDisplay::paint (juce::Graphics& g)
@@ -401,6 +448,12 @@ EnvDisplay::Geometry EnvDisplay::geometry() const
     return gm;
 }
 
+juce::Point<float> EnvDisplay::handlePosition (int handle) const
+{
+    const int idx[] = { 1, 2, 4 };
+    return geometry().p[idx[juce::jlimit (0, 2, handle)]];
+}
+
 int EnvDisplay::handleAt (juce::Point<float> pos) const
 {
     const auto gm = geometry();
@@ -474,12 +527,27 @@ void EnvDisplay::paint (juce::Graphics& g)
     const auto frame = paintFrame (g, true);
     const auto gm = geometry();
 
+    // The engine's segment shapes (dsp/Voice.h, Env): the attack rises exponentially
+    // towards 1.3 and is cut off at full level; decay and release fall exponentially,
+    // their times measured to -60 dB (ln 1000 = 6.9078 time constants).
+    const float bot = gm.area.getBottom(), h = gm.area.getHeight(), sus = juce::jlimit (0.0f, 1.0f, val (2));
+    const float atkLog = std::log (1.3f / 0.3f);
+    const int steps = 24;
+    const auto segment = [&] (juce::Path& path, juce::Point<float> from, juce::Point<float> to, const std::function<float (float)>& level)
+    {
+        for (int i = 1; i <= steps; ++i)
+        {
+            const float x = (float) i / (float) steps;
+            path.lineTo (from.x + (to.x - from.x) * x, bot - level (x) * h);
+        }
+    };
+
     juce::Path p;
     p.startNewSubPath (gm.p[0]);
-    p.lineTo (gm.p[1]);
-    p.quadraticTo (gm.p[1].x + (gm.p[2].x - gm.p[1].x) * 0.22f, gm.p[2].y, gm.p[2].x, gm.p[2].y);
+    segment (p, gm.p[0], gm.p[1], [atkLog] (float x) { return juce::jmin (1.0f, 1.3f * (1.0f - std::exp (-atkLog * x))); });
+    segment (p, gm.p[1], gm.p[2], [sus] (float x) { return sus + (1.0f - sus) * std::exp (-6.9078f * x); });
     p.lineTo (gm.p[3]);
-    p.quadraticTo (gm.p[3].x + (gm.p[4].x - gm.p[3].x) * 0.22f, gm.p[4].y, gm.p[4].x, gm.p[4].y);
+    segment (p, gm.p[3], gm.p[4], [sus] (float x) { return sus * std::exp (-6.9078f * x); });
     paintCurve (g, p, frame, gm.area.getBottom());
 
     // sustain hold is "as long as the key": dashed to say it isn't a time

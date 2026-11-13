@@ -71,6 +71,19 @@ private:
     float dragNorm = 0.0f;
     juce::Point<float> lastDrag;
     std::unique_ptr<juce::TextEditor> entry;
+
+    // While the value field is open: a click anywhere else in the window commits
+    // it. (Focus alone doesn't: JUCE leaves focus where it is when the click lands
+    // on a non-focusable sibling, e.g. another knob of the same section.)
+    struct ClickAway : juce::MouseListener
+    {
+        explicit ClickAway (Knob& k) : knob (k) {}
+        void mouseDown (const juce::MouseEvent&) override;
+        Knob& knob;
+    };
+    ClickAway clickAway { *this };
+    juce::Component::SafePointer<juce::Component> clickAwaySource;
+
     juce::ParameterAttachment attach;      // last: detaches before the rest dies
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Knob)
@@ -91,6 +104,7 @@ public:
     void setInk (int paletteIndex)   { ink = paletteIndex; repaint(); }
     void setDimmed (bool d) override { if (dimmed != d) { dimmed = d; repaint(); } }
     int  selected() const            { return current; }
+    P    parameter() const           { return pid_; }
 
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
@@ -101,6 +115,7 @@ public:
 private:
     int cellAt (int x) const;
 
+    const P pid_;
     juce::StringArray labels, names;
     IconFn icons;
     int current = 0, hover = -1, ink = -1;
@@ -122,6 +137,7 @@ public:
     ToggleChip (APVTS&, P, const juce::String& text, Style);
 
     bool isOn() const                { return on; }
+    P    parameter() const           { return pid_; }
     void setInk (int paletteIndex)   { ink = paletteIndex; repaint(); }
     void setDimmed (bool d) override { if (dimmed != d) { dimmed = d; repaint(); } }
     std::function<void()> onChange;
@@ -132,6 +148,7 @@ public:
     void mouseExit (const juce::MouseEvent&) override  { repaint(); }
 
 private:
+    const P pid_;
     const Style style;
     juce::String text;
     bool on = false, dimmed = false;
@@ -149,8 +166,10 @@ class ParamCombo : public juce::ComboBox,
 public:
     ParamCombo (APVTS&, P);
     void setDimmed (bool d) override { setAlpha (d ? 0.4f : 1.0f); }
+    P    parameter() const           { return pid_; }
 
 private:
+    const P pid_;
     juce::AudioProcessorValueTreeState::ComboBoxAttachment attach;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ParamCombo)
 };

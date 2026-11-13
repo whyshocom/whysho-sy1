@@ -7,8 +7,6 @@ using namespace gui;
 
 namespace
 {
-const juce::Identifier kTheme ("uiTheme"), kWidth ("uiW"), kHeight ("uiH");
-
 bool isLibraryFile (const juce::String& path)
 {
     return path.endsWithIgnoreCase (PresetManager::bankExtension) || path.endsWithIgnoreCase (PresetManager::presetExtension);
@@ -31,10 +29,9 @@ WhyshoSynthAudioProcessorEditor::WhyshoSynthAudioProcessorEditor (WhyshoSynthAud
 
     // ---- theme: per-instance choice lives in the plugin state (as in EQ1);
     //      a brand-new instance starts with the theme the user picked last.
-    auto& tree = proc.state().state;
-    int themeIndex = 0;
-    if (tree.hasProperty (kTheme)) themeIndex = (int) tree.getProperty (kTheme);
-    else                           themeIndex = juce::jmax (0, themeNames().indexOf (settings::get ("theme", "Paper")));
+    auto& ui = proc.uiState();
+    int themeIndex = ui.theme.load();
+    if (themeIndex < 0) themeIndex = juce::jmax (0, themeNames().indexOf (settings::get ("theme", "Paper")));
     applyTheme (themeIndex, false);
 
     // ---- wiring ----
@@ -58,8 +55,8 @@ WhyshoSynthAudioProcessorEditor::WhyshoSynthAudioProcessorEditor (WhyshoSynthAud
     // ---- size: remembered in the plugin state ----
     setResizable (true, true);
     setResizeLimits (minW, minH, maxW, maxH);
-    setSize (juce::jlimit (minW, maxW, (int) tree.getProperty (kWidth, baseW)),
-             juce::jlimit (minH, maxH, (int) tree.getProperty (kHeight, baseH)));
+    const int w = ui.width.load(), h = ui.height.load();
+    setSize (juce::jlimit (minW, maxW, w > 0 ? w : baseW), juce::jlimit (minH, maxH, h > 0 ? h : baseH));
     constructed = true;
 
     startTimerHz (30);
@@ -79,18 +76,36 @@ WhyshoSynthAudioProcessorEditor::~WhyshoSynthAudioProcessorEditor()
 void WhyshoSynthAudioProcessorEditor::applyTheme (int index, bool userChoice)
 {
     setThemeIndex (index);
-    proc.state().state.setProperty (kTheme, currentThemeIndex(), nullptr);
+    stateTheme = currentThemeIndex();
+    proc.uiState().theme.store (stateTheme);
     if (userChoice) settings::set ("theme", theme().name);
+    restyle();
+}
 
+// Re-read everything that caches colours / fonts from the active theme.
+void WhyshoSynthAudioProcessorEditor::restyle()
+{
+    shownTheme = currentThemeIndex();
     lnf.applyTheme();
     keys.applyTheme();
-    topBar.setThemeSelection (currentThemeIndex());
+    topBar.setThemeSelection (shownTheme);
     sendLookAndFeelChange();        // children re-read cached fonts / colours
     repaint();
 }
 
 void WhyshoSynthAudioProcessorEditor::timerCallback()
 {
+    // The active theme is one per process (shared with every other open SY1
+    // window). Two cases to follow, cheaply, on every tick:
+    //   * this instance's saved theme changed under us (session / state recall,
+    //     or a second editor on the same instance) -> make it the active one;
+    //   * another instance changed the active theme -> adopt it for display only.
+    //     Our own saved choice is left alone, so the windows never fight over it.
+    if (const int saved = proc.uiState().theme.load(); saved >= 0 && saved != stateTheme)
+        applyTheme (saved, false);
+    else if (currentThemeIndex() != shownTheme)
+        restyle();
+
     synth.tick();
     topBar.tick();
 
@@ -98,16 +113,6 @@ void WhyshoSynthAudioProcessorEditor::timerCallback()
     {
         slowTick = 0;
         topBar.refresh();
-
-        // A session / state recall replaces the tree under us: follow its theme.
-        auto& tree = proc.state().state;
-        if (! tree.hasProperty (kTheme))                              tree.setProperty (kTheme, currentThemeIndex(), nullptr);
-        else if ((int) tree.getProperty (kTheme) != currentThemeIndex()) applyTheme ((int) tree.getProperty (kTheme), false);
-        if (! tree.hasProperty (kWidth))
-        {
-            tree.setProperty (kWidth, getWidth(), nullptr);
-            tree.setProperty (kHeight, getHeight(), nullptr);
-        }
     }
 }
 
@@ -158,9 +163,8 @@ void WhyshoSynthAudioProcessorEditor::resized()
 
     if (constructed)
     {
-        auto& tree = proc.state().state;
-        tree.setProperty (kWidth, getWidth(), nullptr);
-        tree.setProperty (kHeight, getHeight(), nullptr);
+        proc.uiState().width.store (getWidth());
+        proc.uiState().height.store (getHeight());
     }
 }
 
@@ -235,6 +239,14 @@ void WhyshoSynthAudioProcessorEditor::openSaveDialog()
 void WhyshoSynthAudioProcessorEditor::openPrompt (PromptSpec spec)
 {
     proc.keyboardState().allNotesOff (0);
+    if (prompt != nullptr)
+    {
+        // A prompt may open the next one from its own button callback, so the
+        // old sheet can still be on the call stack: hide it now, delete it later.
+        prompt->setVisible (false);
+        prompt->onDismiss = nullptr;
+        juce::MessageManager::callAsync ([old = std::shared_ptr<Prompt> (prompt.release())] {});
+    }
     prompt = std::make_unique<Prompt> (std::move (spec));
     juce::Component::SafePointer<WhyshoSynthAudioProcessorEditor> safe (this);
     auto* which = prompt.get();
@@ -260,6 +272,7 @@ void WhyshoSynthAudioProcessorEditor::openLicenseDialog()
     licenseDialog->setBounds (root.getLocalBounds());
     root.addAndMakeVisible (*licenseDialog);
     licenseDialog->refreshStatus();
+    if (licenseDialog->isShowing()) licenseDialog->grabKeyboardFocus();     // so Escape closes it straight away
     tooltips.toFront (false);
 }
 

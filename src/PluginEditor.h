@@ -53,6 +53,7 @@ private:
     void globalFocusChanged (juce::Component*) override;
 
     void applyTheme (int index, bool userChoice);
+    void restyle();
     bool notesBlocked() const;      // typing into a field / a sheet is up → keys must not play notes
     void closeOverlays();
 
@@ -71,6 +72,8 @@ private:
 
     bool constructed = false, dragOver = false;
     int slowTick = 0;
+    int stateTheme = -1;        // this instance's saved theme, as last applied by us
+    int shownTheme = -1;        // the process-wide theme our cached colours were read from
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WhyshoSynthAudioProcessorEditor)
 };

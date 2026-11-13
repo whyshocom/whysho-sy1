@@ -3,7 +3,9 @@
 
 namespace wsho::lic
 {
-juce::String getMachineId()
+namespace
+{
+juce::String computeMachineId()
 {
     juce::String seed;
 
@@ -27,5 +29,19 @@ juce::String getMachineId()
     seed << "whysho-sy1-salt-v1";
 
     return juce::SHA256 (seed.toRawUTF8(), (size_t) seed.getNumBytesAsUTF8()).toHexString();
+}
+} // namespace
+
+juce::String getMachineId()
+{
+   #if WSHO_LIC_TESTING
+    return computeMachineId();      // the suite changes WHYSHO_TEST_MACHINE between calls
+   #else
+    // Computed once per process: the OS queries behind it read files and (on
+    // Linux) spawn child processes, and this is called from the message thread
+    // on every license refresh. The id cannot change while the process lives.
+    static const juce::String id = computeMachineId();
+    return id;
+   #endif
 }
 }

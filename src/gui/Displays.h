@@ -5,7 +5,7 @@ namespace wsho { class WhyshoSynthAudioProcessor; }
 
 namespace wsho::gui
 {
-// Display-only approximations of the engine's waveforms (phase 0..1 → -1..1).
+// The engine's waveforms and shape mappings, redrawn for display (phase 0..1 → -1..1).
 float oscWaveValue (int wave, float phase, float shape);
 float lfoWaveValue (int wave, float phase);
 // Small glyphs for the wave selectors (stroked in the current colour).
@@ -59,7 +59,7 @@ public:
     void paint (juce::Graphics&) override;
 };
 
-// Approximate filter magnitude response; drag = cutoff (x) / resonance (y).
+// The engine filter's magnitude response; drag = cutoff (x) / resonance (y).
 class FilterDisplay : public ParamDisplay,
                       public juce::SettableTooltipClient
 {
@@ -88,6 +88,8 @@ class EnvDisplay : public ParamDisplay
 public:
     EnvDisplay (APVTS&, P attack, P decay, P sustain, P release);
     ~EnvDisplay() override;
+    P parameter (int stage) const { return ids[juce::jlimit (0, 3, stage)]; }      // 0..3 = A D S R
+    juce::Point<float> handlePosition (int handle) const;                           // 0 attack, 1 decay+sustain, 2 release
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;

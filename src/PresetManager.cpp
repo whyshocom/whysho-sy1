@@ -65,6 +65,7 @@ struct PresetManager::Impl
     // The reference `isModified()` compares against = what the parameters hold now.
     void markClean()
     {
+        const juce::ScopedLock l (sessionLock);
         for (int i = 0; i < kNumParams; ++i)
             reference[(size_t) i] = params[(size_t) i] != nullptr ? params[(size_t) i]->getValue() : 0.0f;
         forcedModified = false;
@@ -73,6 +74,7 @@ struct PresetManager::Impl
     // ... or what a preset would make them hold, without applying it.
     void setReference (const bankio::ValueTable& values)
     {
+        const juce::ScopedLock l (sessionLock);
         for (int i = 0; i < kNumParams; ++i)
             reference[(size_t) i] = params[(size_t) i] != nullptr ? params[(size_t) i]->convertTo0to1 (values[(size_t) i]) : 0.0f;
         forcedModified = false;
@@ -264,6 +266,7 @@ struct PresetManager::Impl
 
     void setCurrent (int bankIndex, const Preset& p)
     {
+        const juce::ScopedLock l (sessionLock);
         curBankName = banks[(size_t) bankIndex].name;
         meta.name = p.name;  meta.category = p.category;  meta.author = p.author;  meta.notes = p.notes;
         resolveCurrent();
@@ -272,6 +275,7 @@ struct PresetManager::Impl
     // The current preset no longer exists in a bank: keep showing its name, as unsaved.
     void detachCurrent()
     {
+        const juce::ScopedLock l (sessionLock);
         curBankName.clear();
         curBank = curPreset = -1;
         forcedModified = true;
@@ -346,6 +350,10 @@ struct PresetManager::Impl
     int curBank = -1, curPreset = -1;        // derived from the names after every scan
     std::array<float, (size_t) kNumParams> reference {};   // normalised values of the unmodified preset
     bool forcedModified = false;             // modified in a way the reference can't express
+
+    // saveSessionState() may run on a host thread (getStateInformation), so every
+    // write to curBankName / meta / reference / forcedModified takes this lock.
+    juce::CriticalSection sessionLock;
 };
 
 // ===========================================================================
@@ -393,9 +401,12 @@ void PresetManager::load (int bankIndex, int presetIndex)
 void PresetManager::loadInit()
 {
     impl->apply (bankio::defaultValues());
-    impl->meta = {};
-    impl->meta.name = "Init";
-    impl->curBankName.clear();
+    {
+        const juce::ScopedLock l (impl->sessionLock);
+        impl->meta = {};
+        impl->meta.name = "Init";
+        impl->curBankName.clear();
+    }
     impl->resolveCurrent();
     sendChangeMessage();
 }
@@ -482,7 +493,11 @@ bool PresetManager::renameBank (int bankIndex, const juce::String& newName)
     if (renamed.file != old.file) old.file.deleteFile();
 
     if (impl->retargetFavourites (old.name, name)) impl->saveFavourites();
-    if (impl->curBank == bankIndex) impl->curBankName = name;
+    if (impl->curBank == bankIndex)
+    {
+        const juce::ScopedLock l (impl->sessionLock);
+        impl->curBankName = name;
+    }
 
     impl->scan();
     sendChangeMessage();
@@ -553,7 +568,11 @@ bool PresetManager::renamePreset (int bankIndex, int presetIndex, const juce::St
         impl->favourites.insert (favKey (bankName, name));
         impl->saveFavourites();
     }
-    if (wasCurrent) impl->meta.name = name;
+    if (wasCurrent)
+    {
+        const juce::ScopedLock l (impl->sessionLock);
+        impl->meta.name = name;
+    }
     impl->resolveCurrent();
     sendChangeMessage();
     return true;
@@ -668,6 +687,7 @@ void PresetManager::saveSessionState (juce::ValueTree& state) const
 {
     if (! state.isValid()) return;
 
+    const juce::ScopedLock l (impl->sessionLock);
     auto node = state.getOrCreateChildWithName (kSessionNode, nullptr);
     node.removeAllProperties (nullptr);
     node.setProperty (kBankProp,     impl->curBankName,   nullptr);   // kept even if that bank isn't installed here
@@ -683,6 +703,7 @@ void PresetManager::restoreSessionState (const juce::ValueTree& state)
     // The parameters already hold the project's values; this only restores which
     // preset they came from. Nothing is applied.
     const auto node = state.getChildWithName (kSessionNode);
+    const juce::ScopedLock l (impl->sessionLock);
 
     impl->meta = {};
     impl->meta.name     = bankio::cleanText (node[kNameProp].toString(),     bankio::kMaxNameLen);

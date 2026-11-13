@@ -124,7 +124,18 @@ Knob::Knob (APVTS& s, P p, const juce::String& l, Style st)
 
 Knob::~Knob()
 {
+    if (clickAwaySource != nullptr) clickAwaySource->removeMouseListener (&clickAway);
     if (inGesture) attach.endGesture();
+}
+
+void Knob::ClickAway::mouseDown (const juce::MouseEvent& e)
+{
+    auto* field = knob.entry.get();
+    if (field == nullptr || e.eventComponent == field || field->isParentOf (e.eventComponent)) return;
+
+    // deferred: we are inside another component's mouse callback
+    juce::Component::SafePointer<Knob> safe (&knob);
+    juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->endTextEntry (true); });
 }
 
 void Knob::setLabel (const juce::String& l)
@@ -219,11 +230,16 @@ void Knob::beginTextEntry()
     entry->onReturnKey = [finish] { finish (true); };
     entry->onEscapeKey = [finish] { finish (false); };
     entry->onFocusLost = [finish] { finish (true); };
+
+    clickAwaySource = getTopLevelComponent();
+    if (clickAwaySource != nullptr) clickAwaySource->addMouseListener (&clickAway, true);
 }
 
 void Knob::endTextEntry (bool commit)
 {
     if (entry == nullptr) return;
+    if (clickAwaySource != nullptr) clickAwaySource->removeMouseListener (&clickAway);
+    clickAwaySource = nullptr;
     const auto text = entry->getText();
     entry.reset();
     float v = 0.0f;
@@ -328,7 +344,7 @@ void Knob::paintBar (juce::Graphics& g)
 
 // ===========================================================================
 ChoiceStrip::ChoiceStrip (APVTS& s, P p, juce::StringArray shortLabels, IconFn fn)
-    : labels (std::move (shortLabels)), names (paramChoices (p)), icons (std::move (fn)),
+    : pid_ (p), labels (std::move (shortLabels)), names (paramChoices (p)), icons (std::move (fn)),
       attach (*s.getParameter (pid (p)), [this] (float v) { current = juce::roundToInt (v); repaint(); })
 {
     if (labels.isEmpty()) labels = names;
@@ -412,7 +428,7 @@ void ChoiceStrip::paint (juce::Graphics& g)
 
 // ===========================================================================
 ToggleChip::ToggleChip (APVTS& s, P p, const juce::String& txt, Style st)
-    : style (st), text (txt),
+    : pid_ (p), style (st), text (txt),
       attach (*s.getParameter (pid (p)), [this] (float v)
       {
           const bool now = v > 0.5f;
@@ -480,7 +496,7 @@ void ToggleChip::paint (juce::Graphics& g)
 
 // ===========================================================================
 ParamCombo::ParamCombo (APVTS& s, P p)
-    : attach (s, pid (p), (addItemList (paramChoices (p), 1), *this))
+    : pid_ (p), attach (s, pid (p), (addItemList (paramChoices (p), 1), *this))
 {
     setTooltip (paramDef (p).name);
     setScrollWheelEnabled (true);

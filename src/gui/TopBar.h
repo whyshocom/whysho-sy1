@@ -21,6 +21,11 @@ public:
     void setBrowserOpen (bool);
     void setThemeSelection (int index);
 
+    // What the bar currently shows (read by the UI test harness, tools/Snapshot --interact).
+    struct Readout { juce::String kicker, name, index, license; bool edited = false; };
+    Readout readout() const;
+    juce::Component& presetDisplay();
+
     void paint (juce::Graphics&) override;
     void resized() override;
 

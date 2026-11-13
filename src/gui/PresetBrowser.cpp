@@ -90,6 +90,9 @@ public:
 
     static constexpr int rowH = 23;
 
+    const std::vector<Row>& shownRows() const { return rows; }
+    int shownSelection() const { return selected; }
+
 private:
     int rowAt (int y) const
     {
@@ -150,7 +153,11 @@ public:
             const auto r = cell (i);
             if (! r.intersects (clip)) continue;
             const auto& it = owner.items[(size_t) i];
-            const auto& p = pm.bank (it.bank).presets[(size_t) it.preset];
+            // The library can change (another instance, a rescan) before the change
+            // message that rebuilds `items` arrives: never index with a stale entry.
+            const auto& presets = pm.bank (it.bank).presets;
+            if (! juce::isPositiveAndBelow (it.preset, (int) presets.size())) continue;
+            const auto& p = presets[(size_t) it.preset];
             const bool cur = it.bank == cb && it.preset == cp;
             const bool hov = i == hover;
             const bool fav = pm.isFavourite (it.bank, it.preset);
@@ -243,6 +250,9 @@ PresetBrowser::PresetBrowser (PresetManager& m) : pm (m)
     gridView.setViewedComponent (grid.get(), false);
     gridView.setScrollBarsShown (true, false);
     gridView.setScrollBarThickness (9);
+    // A Viewport takes keyboard focus on a click and then uses up / down for
+    // scrolling; here they step through the presets, so focus goes to the browser.
+    gridView.setWantsKeyboardFocus (false);
     addAndMakeVisible (gridView);
 
     bankList->onSelect = [this] (int row) { selectBank (row - 1); message.clear(); rebuild(); };
@@ -320,11 +330,31 @@ void PresetBrowser::opened()
 
 void PresetBrowser::setSearch (const juce::String& s)
 {
-    searchBox.setText (s, true);
+    // No change notification: it arrives asynchronously and would wipe a status
+    // message set right after this call (e.g. "Imported ..."). State is set here.
+    searchBox.setText (s, false);
     search = s.trim();
     rebuildItems();
     repaint();
 }
+
+PresetBrowser::ViewState PresetBrowser::viewState() const
+{
+    ViewState v;
+    for (const auto& r : bankList->shownRows()) { v.bankRows.add (r.text); v.bankCounts.add (r.count); }
+    for (const auto& r : catList->shownRows())  { v.categoryRows.add (r.text); v.categoryCounts.add (r.count); }
+    v.bankSelected = bankList->shownSelection();
+    v.categorySelected = catList->shownSelection();
+    for (const auto& it : items) v.items.emplace_back (it.bank, it.preset);
+    v.message = message;
+    v.messageIsError = messageIsError;
+    return v;
+}
+
+juce::Component& PresetBrowser::bankColumn()     { return *bankList; }
+juce::Component& PresetBrowser::categoryColumn() { return *catList; }
+juce::Component& PresetBrowser::presetGrid()     { return *grid; }
+juce::Rectangle<int> PresetBrowser::presetCell (int itemIndex) const { return grid->cell (itemIndex); }
 
 void PresetBrowser::showMessage (const juce::String& m, bool isError)
 {
@@ -668,15 +698,24 @@ void PresetBrowser::exportBank()
     juce::Component::SafePointer<PresetBrowser> safe (this);
     chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
                               | juce::FileBrowserComponent::warnAboutOverwriting,
-                          [safe, idx = bankSel, name] (const juce::FileChooser& fc)
+                          [safe, name] (const juce::FileChooser& fc)
     {
-        auto f = fc.getResult();
-        if (safe == nullptr || f == juce::File()) return;
-        if (idx >= safe->pm.numBanks() || safe->pm.bank (idx).name != name) return;
-        f = f.withFileExtension (PresetManager::bankExtension);
-        if (safe->pm.exportBank (idx, f)) safe->showMessage ("Exported " + f.getFileName(), false);
-        else safe->showMessage ("Couldn't write " + f.getFileName() + ".", true);
+        const auto f = fc.getResult();
+        if (safe != nullptr && f != juce::File()) safe->exportBankTo (name, f);
     });
+}
+
+void PresetBrowser::exportBankTo (const juce::String& name, juce::File f)
+{
+    // by name: the bank's index may have shifted while the file dialog was up
+    int idx = -1;
+    for (int i = 0; i < pm.numBanks() && idx < 0; ++i)
+        if (pm.bank (i).name == name) idx = i;
+    if (idx < 0) { showMessage ("Couldn't export: " + name + " no longer exists.", true); return; }
+
+    f = f.withFileExtension (PresetManager::bankExtension);
+    if (pm.exportBank (idx, f)) showMessage ("Exported " + f.getFileName(), false);
+    else showMessage ("Couldn't write " + f.getFileName() + ".", true);
 }
 
 void PresetBrowser::exportPresetToFile (const Preset& p)

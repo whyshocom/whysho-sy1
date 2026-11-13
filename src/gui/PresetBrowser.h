@@ -25,7 +25,24 @@ public:
     void importFiles (const juce::Array<juce::File>&);
     void chooseImport();
     void exportPresetToFile (const Preset&);
+    void exportBankTo (const juce::String& bankName, juce::File dest);   // what the export dialog calls with its result
     void openFolder();
+
+    // What the browser currently shows (read by the UI test harness, tools/Snapshot --interact).
+    struct ViewState
+    {
+        juce::StringArray bankRows, categoryRows;       // row 0 = "All banks" / "All", category row 1 = "Favourites"
+        juce::Array<int> bankCounts, categoryCounts;
+        int bankSelected = 0, categorySelected = 0;
+        std::vector<std::pair<int, int>> items;         // { bank, preset } in grid order
+        juce::String message;
+        bool messageIsError = false;
+    };
+    ViewState viewState() const;
+    juce::Component& bankColumn();
+    juce::Component& categoryColumn();
+    juce::Component& presetGrid();
+    juce::Rectangle<int> presetCell (int itemIndex) const;      // in presetGrid() coordinates
 
     void paint (juce::Graphics&) override;
     void resized() override;
