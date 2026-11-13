@@ -1,18 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  whysho SY1 — macOS installer distribution definition (productbuild).
+  whysho SY1 (synthesizer) macOS installer distribution definition (productbuild).
 
   This is a TEMPLATE. scripts/build-macos-installer.sh substitutes the
-  __VERSION__ tokens and resolves the component package references at build
-  time, then invokes:
+  __VERSION__ tokens, then runs productbuild with this file as the
+  distribution, a resources directory and the directory holding the
+  component packages, producing WhyshoSY1-<version>-macOS.pkg.
 
-    productbuild --distribution <processed.xml> \
-                 --resources <resources-dir> \
-                 --package-path <component-pkgs-dir> \
-                 WhyshoSY1-<version>-macOS.pkg
+  Resource files (welcome.html, conclusion.html, license.txt) live in the
+  resources directory. license.txt is a copy of packaging/EULA.txt.
 
-  Resource files (welcome.html, license.txt) live in the --resources dir.
-  license.txt is a copy of packaging/EULA.txt.
+  Note: XML comments must not contain a double hyphen, so command-line
+  flags are deliberately not spelled out here; see the script.
 -->
 <installer-gui-script minSpecVersion="2">
     <title>whysho SY1</title>
@@ -36,7 +35,7 @@
          <background file="background.png" mime-type="image/png"
                      alignment="bottomleft" scaling="proportional"/> -->
 
-    <!-- Component package references (ids match pkgbuild --identifier). -->
+    <!-- Component package references (ids match the identifiers given to pkgbuild). -->
     <pkg-ref id="com.whysho.sy1.vst3"/>
     <pkg-ref id="com.whysho.sy1.au"/>
 
@@ -45,13 +44,13 @@
         <line choice="choice_au"/>
     </choices-outline>
 
-    <choice id="choice_vst3" title="VST3 Plug-In"
-            description="Install the whysho SY1 VST3 plug-in to /Library/Audio/Plug-Ins/VST3.">
+    <choice id="choice_vst3" title="VST3 Instrument"
+            description="Install the whysho SY1 synthesizer as a VST3 instrument to /Library/Audio/Plug-Ins/VST3.">
         <pkg-ref id="com.whysho.sy1.vst3"/>
     </choice>
 
-    <choice id="choice_au" title="Audio Unit (AU)"
-            description="Install the whysho SY1 Audio Unit to /Library/Audio/Plug-Ins/Components.">
+    <choice id="choice_au" title="Audio Unit (AU) Instrument"
+            description="Install the whysho SY1 synthesizer as an Audio Unit instrument to /Library/Audio/Plug-Ins/Components (Logic Pro, GarageBand, MainStage).">
         <pkg-ref id="com.whysho.sy1.au"/>
     </choice>
 

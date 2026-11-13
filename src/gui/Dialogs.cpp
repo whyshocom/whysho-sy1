@@ -77,7 +77,7 @@ bool Overlay::keyPressed (const juce::KeyPress& k)
 
 // ===========================================================================
 Prompt::Prompt (PromptSpec s)
-    : Overlay (s.kicker, s.title, 410, s.wantsText ? 222 : 190), spec (std::move (s))
+    : Overlay (s.kicker, s.title, 410, s.wantsText ? 222 : 176), spec (std::move (s))
 {
     message.setText (spec.message, juce::dontSendNotification);
     message.setJustificationType (juce::Justification::topLeft);
@@ -211,8 +211,9 @@ void SaveDialog::fillBanks()
 
 void SaveDialog::bankChanged()
 {
-    newBank.setVisible (bank.getSelectedId() == newBankId);
-    repaint();
+    const bool wantsName = bank.getSelectedId() == newBankId;
+    newBank.setVisible (wantsName);
+    setPanelHeight (wantsName ? 404 : 372);      // the sheet grows a row for the new bank's name
 }
 
 void SaveDialog::setStatus (const juce::String& s, juce::Colour c)
@@ -256,7 +257,7 @@ void SaveDialog::layout (juce::Rectangle<int> c)
     row (author, 26);
     row (notes, 44);
     row (bank, 26);
-    row (newBank, 26);
+    if (newBank.isVisible()) row (newBank, 26);
 
     auto buttons = c.removeFromBottom (28);
     exportBtn.setBounds (buttons.removeFromLeft (120));

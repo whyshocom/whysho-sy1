@@ -147,7 +147,7 @@ inline const std::vector<Theme>& themes()
                   C (0xff765BA7), C (0xffFF6C2F), C (0xffF15060), C (0xff1B1813) } );
             t.accentText = C (0xffB0006A);          // the site's --pink-text
             t.onAccent   = C (0xff1B1813);
-            t.gridInk    = C (0xffFF48B0).withAlpha (0.20f);
+            t.gridInk    = C (0xffFF48B0).withAlpha (0.16f);
             t.radius     = 0.0f;
             v.push_back (t);
         }

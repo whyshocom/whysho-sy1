@@ -1,8 +1,8 @@
 # whysho SY1 — Packaging & Installers
 
 This directory holds everything needed to turn a built copy of **whysho SY1**
-into distributable installers for Windows and macOS, plus the CI that does it
-automatically.
+(a synthesizer: VST3 / AU instrument plus a Standalone app) into distributable
+installers for Windows and macOS, plus the CI that does it automatically.
 
 - **Windows:** Inno Setup `.exe` installer → `WhyshoSY1-<version>-Windows.exe`
 - **macOS:** `pkgbuild` + `productbuild` `.pkg` installer → `WhyshoSY1-<version>-macOS.pkg`
@@ -28,7 +28,7 @@ scripts/
 |-------------|------------------------------------------------|----------------------------------------------|
 | VST3        | `C:\Program Files\Common Files\VST3\`          | `/Library/Audio/Plug-Ins/VST3/`              |
 | AU          | — (not built on Windows)                       | `/Library/Audio/Plug-Ins/Components/`        |
-| Standalone  | `C:\Program Files\whysho\whysho SY1\` + Start Menu shortcut | (not packaged in the `.pkg`)   |
+| Standalone  | `C:\Program Files\whysho\whysho SY1\` + Start Menu shortcut | (built, but not packaged in the `.pkg`) |
 
 ## Build artefacts consumed
 
@@ -99,7 +99,9 @@ git tag v1.4.0 && git push origin v1.4.0
 
 - **Triggers:** push to `main` or `claude/**`, push of a `v*` tag, or manual
   `workflow_dispatch`.
-- **Matrix:** `windows-latest` and `macos-14` (Apple Silicon; builds universal2).
+- **Matrix:** `windows-latest` and a **self-hosted macOS** runner (builds
+  universal2). The macOS leg is `continue-on-error`, so a missing runner never
+  blocks the Windows installer or the release.
 - **Steps:** checkout (full history for tags) → resolve version → restore the
   CPM/FetchContent dependency cache → cmake configure + build Release → install
   Inno Setup (Windows) → run the packaging script → upload `dist/*` as an

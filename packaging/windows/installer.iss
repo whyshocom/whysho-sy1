@@ -2,8 +2,8 @@
 ;  whysho SY1 — Windows installer (Inno Setup 6)
 ; =============================================================================
 ;
-;  This script packages the VST3 plug-in and the Standalone application into a
-;  single Windows installer (.exe).
+;  This script packages the SY1 synthesizer — the VST3 instrument plug-in and
+;  the Standalone application — into a single Windows installer (.exe).
 ;
 ;  It is driven by preprocessor defines that scripts/build-windows-installer.ps1
 ;  passes on the ISCC command line, e.g.:
@@ -53,8 +53,10 @@
 #define StandaloneExe AddBackslash(ArtefactsDir) + "Standalone\whysho SY1.exe"
 
 [Setup]
-; A stable, unique AppId (GUID) so upgrades and uninstall work across versions.
-AppId={{8F3C2A1E-7B64-4D9A-9C21-1E5A4F0B7D33}
+; A stable AppId (GUID) so upgrades and uninstall work across versions. It is
+; unique to SY1: sharing one with another whysho product would make the two
+; installers upgrade and uninstall each other. Never change it once released.
+AppId={{B86F09AC-6453-4469-A3A6-4307C6734357}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
@@ -95,14 +97,14 @@ Name: "full";   Description: "Full installation"
 Name: "custom"; Description: "Custom installation"; Flags: iscustom
 
 [Components]
-Name: "vst3";       Description: "VST3 plug-in";         Types: full custom; Flags: checkablealone
-Name: "standalone"; Description: "Standalone application"; Types: full custom
+Name: "vst3";       Description: "VST3 instrument (for your DAW)";            Types: full custom; Flags: checkablealone
+Name: "standalone"; Description: "Standalone application (play without a DAW)"; Types: full custom
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Components: standalone; Flags: unchecked
 
 [Files]
-; --- VST3 plug-in bundle -> C:\Program Files\Common Files\VST3 -----------------
+; --- VST3 instrument bundle -> C:\Program Files\Common Files\VST3 -----------------
 ; The .vst3 is a bundle (a directory tree); install it recursively.
 Source: "{#Vst3Bundle}\*"; DestDir: "{commoncf64}\VST3\{#AppName}.vst3"; \
     Components: vst3; Flags: ignoreversion recursesubdirs createallsubdirs

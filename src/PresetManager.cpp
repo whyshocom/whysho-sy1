@@ -354,7 +354,8 @@ PresetManager::~PresetManager() = default;
 
 const juce::StringArray& PresetManager::categories()
 {
-    static const juce::StringArray c { "808", "Bass", "Lead", "Pluck", "Keys", "Bell", "Pad", "Brass", "Strings", "FX" };
+    static const juce::StringArray c { "808", "Bass", "Lead", "Pluck", "Keys", "Piano", "Bell", "Synth",
+                                         "Pad", "Pulse", "Strings", "Brass", "FX" };
     return c;
 }
 

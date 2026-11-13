@@ -2,9 +2,9 @@ WHYSHO SY1 — END USER LICENSE AGREEMENT
 
 IMPORTANT — READ CAREFULLY. This End User License Agreement ("Agreement")
 is a legal agreement between you (either an individual or a single entity,
-"You") and whysho ("whysho", "we", "us") for the whysho SY1 audio plug-in
-software, associated media, and accompanying documentation (collectively,
-the "Software").
+"You") and whysho ("whysho", "we", "us") for the whysho SY1 synthesizer
+plug-in and standalone software, its included presets, associated media,
+and accompanying documentation (collectively, the "Software").
 
 BY INSTALLING, COPYING, OR OTHERWISE USING THE SOFTWARE, YOU AGREE TO BE
 BOUND BY THE TERMS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT INSTALL
@@ -18,8 +18,9 @@ before any public commercial release.
    Subject to Your compliance with this Agreement and payment of all
    applicable license fees, whysho grants You a non-exclusive,
    non-transferable license to install and use the Software on computers
-   that You own or control, solely for Your own music production and
-   audio-processing purposes.
+   that You own or control, solely for Your own music production, sound
+   design, and performance purposes. Music and recordings You make with
+   the Software, including with its included presets, are Yours.
 
 2. RESTRICTIONS
    You may not, and may not permit any third party to: (a) rent, lease,

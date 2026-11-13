@@ -1,6 +1,6 @@
 name: Build
 
-# Build the Whysho SY1 plugin on Windows and macOS, package installers, upload
+# Build the whysho SY1 synthesizer plugin on Windows and macOS, package installers, upload
 # them as artifacts, and (on a v* tag) publish them to a GitHub Release.
 
 on:

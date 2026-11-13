@@ -508,7 +508,7 @@ void EnvDisplay::paint (juce::Graphics& g)
                        : active == 1 ? "D " + formatParam (ids[1], val (1)) + dot + "S " + formatParam (ids[2], val (2))
                                      : "R " + formatParam (ids[3], val (3));
         g.setFont (themeFont (9.5f, true));
-        const auto box = frame.reduced (4.0f, 3.0f).removeFromTop (12.0f);
+        auto box = frame.reduced (4.0f, 3.0f).removeFromTop (12.0f);
         const float w = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), txt) + 8.0f;
         const auto pill = box.removeFromRight (w);
         g.setColour (t.display.withAlpha (0.85f));

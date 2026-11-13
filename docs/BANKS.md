@@ -82,7 +82,7 @@ A `.sy1preset` file is one preset with the header on top:
 | `version`  | Format version, currently `1`. Files with a newer version still load; parts this version of the plugin doesn't know are skipped. |
 | `name`     | Bank or preset name, up to 64 characters. Preset names are unique inside a bank. |
 | `author`   | Free text, up to 64 characters. |
-| `category` | One of `808`, `Bass`, `Lead`, `Pluck`, `Keys`, `Bell`, `Pad`, `Brass`, `Strings`, `FX`. Other text is kept, but such a preset only appears under "All". |
+| `category` | One of `808`, `Bass`, `Lead`, `Pluck`, `Keys`, `Piano`, `Bell`, `Synth`, `Pad`, `Pulse`, `Strings`, `Brass`, `FX`. Other text is kept, but such a preset only appears under "All". |
 | `notes`    | One-line description, up to 512 characters. |
 | `params`   | `"parameter id": value` pairs. |
 

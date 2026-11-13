@@ -165,7 +165,7 @@ void SynthPanel::buildOsc (int i)
     {
         wave->setBounds (b.removeFromTop (20));
         b.removeFromTop (4);
-        const int kh = juce::jmin (kKnobH + 6, (b.getHeight() - 30) / 2);
+        const int kh = juce::jmin (kKnobH, (b.getHeight() - 36) / 2);
         auto r2 = b.removeFromBottom (kh), r1 = b.removeFromBottom (kh);
         knobRow (r1, { k[0], k[1], k[2] });
         knobRow (r2, { k[3], k[4], k[5] });
@@ -477,13 +477,13 @@ void SynthPanel::resized()
 {
     const int margin = 7, gap = 6;
     auto area = getLocalBounds().reduced (margin, 0).withTrimmedTop (margin).withTrimmedBottom (margin);
-    const int rowWeights[] = { 196, 186, 172 };
+    const int rowWeights[] = { 208, 186, 160 };
     const int totalH = area.getHeight() - 2 * gap;
     int y = area.getY();
 
     for (int r = 0; r < 3; ++r)
     {
-        const int h = r == 2 ? area.getBottom() - y : totalH * rowWeights[r] / (196 + 186 + 172);
+        const int h = r == 2 ? area.getBottom() - y : totalH * rowWeights[r] / (208 + 186 + 160);
         const int n = (int) rows[r].size();
         int sum = 0;
         for (int w : rowWidths[r]) sum += w;

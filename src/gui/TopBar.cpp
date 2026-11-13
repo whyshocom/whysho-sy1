@@ -71,7 +71,7 @@ public:
         g.setColour (t.accentText);
         g.drawText (caps (kicker), top, juce::Justification::centredLeft, true);
 
-        g.setFont (displayFont (20.0f));
+        g.setFont (displayFont (21.5f));
         g.setColour (t.text);
         g.drawText (name, mid.withTrimmedBottom (3), juce::Justification::centredLeft, true);
     }
