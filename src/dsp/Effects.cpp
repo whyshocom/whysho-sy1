@@ -40,8 +40,10 @@ inline double shapeAD (int type, double x) noexcept
         default:    return logCosh (x);
     }
 }
-inline float equalPowerDry (float m) noexcept { return std::sqrt (1.0f - m); }
-inline float equalPowerWet (float m) noexcept { return std::sqrt (m); }
+// Constant-power dry / wet law. sin / cos (rather than sqrt) so a mix fading
+// in from zero has a finite slope and cannot click.
+inline float equalPowerDry (float m) noexcept { return sinHalfPi (1.0f - m); }
+inline float equalPowerWet (float m) noexcept { return sinHalfPi (m); }
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -105,10 +107,20 @@ void Drive::process (float* l, float* r, int n, bool on, int type, float amt, fl
     float compTarget = 1.0f;
     if (type != dCrush)
     {
-        const float ref = 0.25f;
-        const float shaped = type == dFold ? std::sin (0.5f * kPi * std::min (1.0f, gTarget * ref))
-                                           : (float) std::abs (shapeF (type, (double) (gTarget * ref)));
-        compTarget = ref / std::max (0.05f, shaped);
+        // Match the level of a nominal -12 dBFS peak signal; a saturated wave has a
+        // much lower crest factor than what went in, so back off further as it squares up.
+        const float ref = 0.25f, x = gTarget * ref;
+        if (type == dFold)
+        {
+            const float shaped = std::sin (0.5f * kPi * std::min (1.0f, x));
+            compTarget = ref / shaped * (1.0f - 0.3f * clampf ((x - 0.6f) * 1.25f, 0.0f, 1.0f));
+        }
+        else
+        {
+            const float shaped = 0.5f * (float) (std::abs (shapeF (type, (double) x)) + std::abs (shapeF (type, (double) -x)));
+            const float squash = 1.0f - shaped / x;      // 0 = linear, → 1 = fully clipped
+            compTarget = ref / std::max (0.05f, shaped) * (1.0f - 0.45f * squash);
+        }
     }
     if (idle) { gainS.snap (gTarget); compS.snap (compTarget); idle = false; }
     if (type != lastType)
@@ -174,6 +186,7 @@ void Chorus::prepare (double sr)
     for (auto& d : line) d.resize ((int) (0.05 * sr) + 8);
     mixS.setTime (0.01f, sampleRate);
     depthS.setTime (0.05f, sampleRate);
+    inS.setTime (0.004f, sampleRate);
     reset();
 }
 
@@ -187,9 +200,11 @@ void Chorus::reset() noexcept
 void Chorus::process (float* l, float* r, int n, bool on, float rateHz, float depth, float mix) noexcept
 {
     if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
-    if (idle) { depthS.snap (depth); idle = false; }
+    // Feeding a delay line from mid-waveform puts a step into it that plays
+    // back later: the input is faded as well as the mix.
+    if (idle) { depthS.snap (depth); inS.snap (0.0f); idle = false; }
 
-    const float mixTarget = on ? mix : 0.0f;
+    const float mixTarget = on ? mix : 0.0f, inTarget = on ? 1.0f : 0.0f;
     const float inc = rateHz / sampleRate;
     const float base1 = 0.008f * sampleRate, base2 = 0.0135f * sampleRate;
     const float* sine = WaveTables::get().sine();
@@ -203,8 +218,9 @@ void Chorus::process (float* l, float* r, int n, bool on, float rateHz, float de
         // two taps per side, quadrature between the channels for width
         const float a = WaveTables::read (sine, phase);
         const float b = WaveTables::read (sine, wrap01 (phase + 0.25f));
-        line[0].write (l[i]);
-        line[1].write (r[i]);
+        const float inG = inS.next (inTarget);
+        line[0].write (l[i] * inG);
+        line[1].write (r[i] * inG);
         const float wl = 0.5f * (line[0].readHermite (base1 + dep * a) + line[0].readHermite (base2 - dep * b));
         const float wr = 0.5f * (line[1].readHermite (base1 + dep * b) + line[1].readHermite (base2 + dep * a));
 
@@ -220,7 +236,8 @@ void Delay::prepare (double sr)
     sampleRate = (float) sr;
     for (auto& d : line) d.resize ((int) (2.0 * sr) + 16);
     mixS.setTime (0.01f, sampleRate);
-    timeS.setTime (0.08f, sampleRate);     // tape-style glide when the time changes
+    xfStep = 1.0f / (0.04f * sampleRate);   // 40 ms tap cross-fade
+    inS.setTime (0.004f, sampleRate);
     fbS.setTime (0.02f, sampleRate);
     pingS.setTime (0.02f, sampleRate);
     lpCoef = 1.0f - std::exp (-2.0f * kPi * 7000.0f / sampleRate);
@@ -242,19 +259,34 @@ void Delay::process (float* l, float* r, int n, bool on, float seconds, float fe
     if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
 
     const float target = clampf (seconds * sampleRate, 2.0f, (float) (line[0].capacity() - 8));
-    if (! timeValid) { timeS.snap (target); fbS.snap (feedback); pingS.snap (pingPong ? 1.0f : 0.0f); timeValid = true; }
+    if (! timeValid)
+    {
+        dCur = dNext = target; xfActive = false;
+        fbS.snap (feedback); pingS.snap (pingPong ? 1.0f : 0.0f); inS.snap (0.0f);
+        timeValid = true;
+    }
     idle = false;
-    const float mixTarget = on ? mix : 0.0f;
+    const float mixTarget = on ? mix : 0.0f, inTarget = on ? 1.0f : 0.0f;
     const float pingTarget = pingPong ? 1.0f : 0.0f;
 
     for (int i = 0; i < n; ++i)
     {
         const float m = mixS.next (mixTarget);
-        const float d = timeS.next (target);
         const float fb = fbS.next (feedback);
         const float pg = pingS.next (pingTarget);
 
-        const float tl = line[0].readHermite (d), tr = line[1].readHermite (d);
+        // A new delay time is cross-faded in from a second tap: no pitch
+        // sweep, no click — tempo / division changes stay musical.
+        if (! xfActive && std::abs (target - dCur) > 0.5f) { dNext = target; xf = 0.0f; xfActive = true; }
+        float tl = line[0].readHermite (dCur), tr = line[1].readHermite (dCur);
+        if (xfActive)
+        {
+            xf += xfStep;
+            const float x = std::min (1.0f, xf), w = x * x * (3.0f - 2.0f * x);
+            tl += w * (line[0].readHermite (dNext) - tl);
+            tr += w * (line[1].readHermite (dNext) - tr);
+            if (xf >= 1.0f) { dCur = dNext; xfActive = false; }
+        }
 
         // feedback path: gentle band-limiting so repeats darken and sub build-up is avoided
         float fl = tl, fr = tr;
@@ -263,7 +295,8 @@ void Delay::process (float* l, float* r, int n, bool on, float seconds, float fe
         hp[0] += hpCoef * (fl - hp[0]); fl -= hp[0];
         hp[1] += hpCoef * (fr - hp[1]); fr -= hp[1];
 
-        const float inL = on ? l[i] : 0.0f, inR = on ? r[i] : 0.0f;
+        const float inG = inS.next (inTarget);
+        const float inL = l[i] * inG, inR = r[i] * inG;
         const float mono = 0.5f * (inL + inR);
         // ping-pong: mono in → left line, left → right → left ...
         line[0].write (inL + pg * (mono - inL) + fb * (fl + pg * (fr - fl)));
@@ -300,6 +333,7 @@ void Reverb::prepare (double sr)
         }
     inHpCoef = 1.0f - std::exp (-2.0f * kPi * 110.0f / sampleRate);
     mixS.setTime (0.01f, sampleRate);
+    inS.setTime (0.004f, sampleRate);
     lastSize = lastDamp = -1.0f;
     reset();
 }
@@ -317,7 +351,7 @@ void Reverb::reset() noexcept
 void Reverb::process (float* l, float* r, int n, bool on, float size, float damp, float mix) noexcept
 {
     if (! on && mixS.z < kOnThreshold) { if (! idle) reset(); return; }
-    idle = false;
+    if (idle) { inS.snap (0.0f); idle = false; }
 
     if (differs (size, lastSize))
     {
@@ -333,7 +367,7 @@ void Reverb::process (float* l, float* r, int n, bool on, float size, float damp
         dampCoef = 1.0f - std::exp (-2.0f * kPi * fc / sampleRate);
     }
 
-    const float mixTarget = on ? mix : 0.0f;
+    const float mixTarget = on ? mix : 0.0f, inTarget = on ? 1.0f : 0.0f;
     const float apG = 0.6f;
 
     for (int i = 0; i < n; ++i)
@@ -341,7 +375,8 @@ void Reverb::process (float* l, float* r, int n, bool on, float size, float damp
         const float m = mixS.next (mixTarget);
 
         // input: low-cut (keeps 808 subs out of the tank) then allpass diffusion
-        float in[2] = { on ? l[i] : 0.0f, on ? r[i] : 0.0f };
+        const float inG = inS.next (inTarget);
+        float in[2] = { l[i] * inG, r[i] * inG };
         for (int c = 0; c < 2; ++c)
         {
             inHp[c] += inHpCoef * (in[c] - inHp[c]);
@@ -439,5 +474,9 @@ void Master::process (float* l, float* r, int n, float gainDb) noexcept
             ch[c][i] = y;
         }
     }
+
+    // Let the DC blocker settle to exact digital silence instead of decaying forever.
+    for (int c = 0; c < 2; ++c)
+        if (std::abs (dcX[c]) < 1.0e-9f && std::abs (dcY[c]) < 1.0e-9f) dcX[c] = dcY[c] = 0.0f;
 }
 } // namespace wsho::dsp

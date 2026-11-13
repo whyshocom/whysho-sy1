@@ -136,7 +136,7 @@ void ParamDisplay::tick()
     for (size_t i = 0; i < watched.size(); ++i)
     {
         const float v = watched[i]->load (std::memory_order_relaxed);
-        if (v != last[i]) { last[i] = v; changed = true; }
+        if (! juce::exactlyEqual (v, last[i])) { last[i] = v; changed = true; }
     }
     if (changed) repaint();
 }

@@ -54,7 +54,7 @@ public:
     void process (float* l, float* r, int n, bool on, float rateHz, float depth, float mix) noexcept;
 private:
     float sampleRate = 48000.0f, phase = 0.0f;
-    OnePole mixS, depthS;
+    OnePole mixS, depthS, inS;
     bool idle = true;
     DelayLine line[2];
 };
@@ -67,8 +67,9 @@ public:
     void process (float* l, float* r, int n, bool on, float seconds, float feedback, bool pingPong, float mix) noexcept;
 private:
     float sampleRate = 48000.0f;
-    OnePole mixS, timeS, fbS, pingS;
-    bool idle = true, timeValid = false;
+    OnePole mixS, fbS, pingS, inS;
+    bool idle = true, timeValid = false, xfActive = false;
+    float dCur = 2.0f, dNext = 2.0f, xf = 0.0f, xfStep = 0.001f;   // time changes cross-fade between two taps
     DelayLine line[2];
     float lp[2] {}, hp[2] {}, lpCoef = 0.5f, hpCoef = 0.01f;
 };
@@ -82,7 +83,7 @@ public:
 private:
     static constexpr int kLines = 8, kAp = 3;
     float sampleRate = 48000.0f;
-    OnePole mixS;
+    OnePole mixS, inS;
     bool idle = true;
     DelayLine line[kLines], ap[2][kAp];
     int   len[kLines] {}, apLen[2][kAp] {};

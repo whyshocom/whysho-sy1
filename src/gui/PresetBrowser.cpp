@@ -541,10 +541,10 @@ void PresetBrowser::presetMenu (const Item& it)
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), [safe, it, fav] (int r)
     {
         if (safe == nullptr || r == 0) return;
-        auto& pm = safe->pm;
-        if (it.bank >= pm.numBanks() || it.preset >= (int) pm.bank (it.bank).presets.size()) return;
-        const auto preset = pm.bank (it.bank).presets[(size_t) it.preset];
-        if (r == 1) { pm.setFavourite (it.bank, it.preset, ! fav); safe->rebuild(); }
+        auto& lib = safe->pm;
+        if (it.bank >= lib.numBanks() || it.preset >= (int) lib.bank (it.bank).presets.size()) return;
+        const auto preset = lib.bank (it.bank).presets[(size_t) it.preset];
+        if (r == 1) { lib.setFavourite (it.bank, it.preset, ! fav); safe->rebuild(); }
         else if (r == 2) safe->exportPresetToFile (preset);
         else if (r == 4)
         {
@@ -574,7 +574,7 @@ void PresetBrowser::presetMenu (const Item& it)
             PromptSpec s;
             s.kicker = "Delete preset";
             s.title = preset.name;
-            s.message = "Delete this preset from " + pm.bank (it.bank).name + "? This can't be undone.";
+            s.message = "Delete this preset from " + lib.bank (it.bank).name + "? This can't be undone.";
             s.okText = "Delete";
             s.onOk = [safe, it, name = preset.name] (const juce::String&)
             {
