@@ -7,10 +7,17 @@
 //  Reminders while editing:
 //    * osc shape  : Square = pulse width, SuperSaw = detune, others = wavefold
 //    * flt_env    : +-1 = +-10 octaves        * mod -> Cutoff : +-1 = +-5 octaves
-//    * mod -> Pitch : +-1 = +-24 semitones (0.005 ~ 12 cents of vibrato)
+//    * mod -> Pitch : 24 x amt x |amt| semitones (0.05 = 6 ct, 0.07 = 12 ct of
+//                     vibrato, 0.2041 = 1 st, 0.7071 = 12 st)
 //    * pitch_amt  : semitones, decaying to 0 over pitch_dec — the 808 knock;
 //                   negative + long decay = a riser
-//    * mod -> Level with a synced LFO = gate / pump (the "Pulse" category)
+//    * mod -> Level : gain x (1 + amt x source), clamped 0..2. With a synced LFO
+//                     this is a gate / pump (the "Pulse" category): +-1.0 for a
+//                     full gate; a NEGATIVE amount on the falling Saw ducks and
+//                     recovers (sidechain). Synced LFOs are not locked to the host
+//                     bar position, so Pulse presets leave LFO retrigger on.
+//    * master_gain is set by measurement so every preset lands near the same
+//      loudness on its typical phrase; retune it after changing a sound.
 //    * FM is osc 2 -> osc 1; presets that use osc 2 only as a modulator keep
 //      its level low rather than 0.
 //  Never rename a shipped preset: favourites and DAW sessions find it by name.
@@ -50,87 +57,91 @@ Bank makeFactoryBank()
     add (b, "Long Sub", "808", "Clean, long sine 808 with a soft knock. The default trap low end.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
-        { P::pitchAmt, 12.0f }, { P::pitchDec, 0.045f },
         { P::fltCutoff, 8000.0f },
         { P::ampA, 0.001f }, { P::ampD, 4.0f }, { P::ampS, 0.5f }, { P::ampR, 0.45f },
+        { P::pitchAmt, 12.0f }, { P::pitchDec, 0.045f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.2f },
         { P::drvOn, on }, { P::drvType, dSoft }, { P::drvAmt, 0.12f },
+        { P::masterGain, -0.5f },
     });
 
     add (b, "Burnt 808", "808", "Hard-clipped 808 that cuts through on small speakers.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f }, { P::osc1Shape, 0.12f },
-        { P::pitchAmt, 24.0f }, { P::pitchDec, 0.055f },
         { P::fltCutoff, 3200.0f }, { P::fltDrive, 0.3f },
         { P::ampA, 0.001f }, { P::ampD, 3.0f }, { P::ampS, 0.45f }, { P::ampR, 0.3f },
+        { P::pitchAmt, 24.0f }, { P::pitchDec, 0.055f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.15f },
         { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.62f }, { P::drvMix, 0.85f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, -0.5f },
     });
 
     add (b, "Knock", "808", "Short, punchy 808 hit with a big pitch drop. For fast patterns.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
+        { P::ampA, 0.001f }, { P::ampD, 0.9f }, { P::ampS, 0.0f }, { P::ampR, 0.15f },
         { P::pitchAmt, 36.0f }, { P::pitchDec, 0.03f },
-        { P::ampA, 0.001f }, { P::ampD, 0.5f }, { P::ampS, 0.0f }, { P::ampR, 0.12f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.3f },
         { P::drvOn, on }, { P::drvType, dSoft }, { P::drvAmt, 0.3f },
+        { P::masterGain, 6.0f },
     });
 
-    add (b, "Slide 808", "808", "Legato 808: overlap notes to glide between them.",
+    add (b, "Slide 808", "808", "Legato 808 with soft saturation: overlap notes to glide between them.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
-        { P::pitchAmt, 18.0f }, { P::pitchDec, 0.05f },
         { P::fltCutoff, 6000.0f },
-        { P::ampA, 0.001f }, { P::ampD, 3.5f }, { P::ampS, 0.55f }, { P::ampR, 0.35f },
+        { P::ampA, 0.001f }, { P::ampD, 3.5f }, { P::ampS, 0.8f }, { P::ampR, 0.35f },
+        { P::pitchAmt, 24.0f }, { P::pitchDec, 0.035f },
         { P::voiceMode, vmLegato }, { P::glide, 0.11f }, { P::bendRange, 12.0f }, { P::velSens, 0.2f },
-        { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.4f },
+        { P::drvOn, on }, { P::drvType, dSoft }, { P::drvAmt, 0.5f },
     });
 
     add (b, "Warm Tube", "808", "Round triangle-and-sine 808 through tube drive.",
     {
         { P::osc1Wave, wTriangle }, { P::osc1Level, 0.7f },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Level, 0.8f },
-        { P::pitchAmt, 14.0f }, { P::pitchDec, 0.06f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 1200.0f }, { P::fltKey, 0.5f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 2000.0f }, { P::fltKey, 0.5f },
         { P::ampA, 0.001f }, { P::ampD, 2.8f }, { P::ampS, 0.5f }, { P::ampR, 0.4f },
+        { P::pitchAmt, 14.0f }, { P::pitchDec, 0.06f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.2f },
-        { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.5f },
+        { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.75f },
+        { P::masterGain, 1.0f },
     });
 
     add (b, "Growl 808", "808", "Wavefolded 808 whose harmonics bloom on the hit and die away.",
     {
-        { P::osc1Wave, wSine }, { P::osc1Level, 1.0f }, { P::osc1Shape, 0.2f },
-        { P::pitchAmt, 24.0f }, { P::pitchDec, 0.05f },
+        { P::osc1Wave, wSine }, { P::osc1Level, 1.0f }, { P::osc1Shape, 0.17f },
         { P::fltCutoff, 5000.0f },
         { P::ampA, 0.001f }, { P::ampD, 2.6f }, { P::ampS, 0.4f }, { P::ampR, 0.3f },
         { P::fltD, 0.6f }, { P::fltS, 0.0f },
-        { P::mod1Src, msFltEnv }, { P::mod1Dst, mdShape }, { P::mod1Amt, 0.35f },
+        { P::pitchAmt, 24.0f }, { P::pitchDec, 0.05f },
+        { P::mod1Src, msFltEnv }, { P::mod1Dst, mdShape }, { P::mod1Amt, 0.22f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.2f },
-        { P::drvOn, on }, { P::drvType, dFold }, { P::drvAmt, 0.35f }, { P::drvMix, 0.6f },
-        { P::masterGain, -2.0f },
+        { P::drvOn, on }, { P::drvType, dFold }, { P::drvAmt, 0.3f }, { P::drvMix, 0.6f },
     });
 
     add (b, "Bit Dust 808", "808", "Lo-fi, bit-crushed 808 for plugg and dusty beats.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
-        { P::pitchAmt, 20.0f }, { P::pitchDec, 0.04f },
         { P::fltCutoff, 4000.0f },
         { P::ampA, 0.001f }, { P::ampD, 1.6f }, { P::ampS, 0.3f }, { P::ampR, 0.25f },
+        { P::pitchAmt, 20.0f }, { P::pitchDec, 0.04f },
         { P::voiceMode, vmMono }, { P::bendRange, 12.0f }, { P::velSens, 0.2f },
-        { P::drvOn, on }, { P::drvType, dCrush }, { P::drvAmt, 0.45f }, { P::drvMix, 0.5f },
+        { P::drvOn, on }, { P::drvType, dCrush }, { P::drvAmt, 0.75f }, { P::drvMix, 0.8f },
+        { P::masterGain, 2.0f },
     });
 
     add (b, "Drill Slide", "808", "Gritty drill 808 with long legato slides and a mid-range edge.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
-        { P::osc2On, on }, { P::osc2Wave, wTriangle }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.15f },
-        { P::pitchAmt, 12.0f }, { P::pitchDec, 0.04f },
-        { P::fltCutoff, 2200.0f }, { P::fltEnv, 0.15f }, { P::fltD, 0.5f },
+        { P::osc2On, on }, { P::osc2Wave, wTriangle }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.3f },
+        { P::fltCutoff, 3000.0f }, { P::fltEnv, 0.15f },
         { P::ampA, 0.001f }, { P::ampD, 3.0f }, { P::ampS, 0.6f }, { P::ampR, 0.25f },
+        { P::fltD, 0.5f },
+        { P::pitchAmt, 12.0f }, { P::pitchDec, 0.04f },
         { P::voiceMode, vmLegato }, { P::glide, 0.2f }, { P::bendRange, 12.0f }, { P::velSens, 0.15f },
-        { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.5f },
-        { P::masterGain, -2.0f },
+        { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.7f },
+        { P::masterGain, 1.0f },
     });
 
     // =======================================================================
@@ -141,53 +152,56 @@ Bank makeFactoryBank()
         { P::osc1Fine, -14.0f },
         { P::osc2On, on }, { P::osc2Fine, 14.0f }, { P::osc2Level, 0.8f },
         { P::subLevel, 0.5f },
-        { P::fltCutoff, 420.0f }, { P::fltReso, 0.2f }, { P::fltDrive, 0.35f }, { P::fltKey, 0.3f },
+        { P::fltCutoff, 1200.0f }, { P::fltReso, 0.2f }, { P::fltDrive, 0.45f }, { P::fltKey, 0.3f },
         { P::ampA, 0.005f }, { P::ampS, 1.0f }, { P::ampR, 0.2f },
         { P::lfo2Rate, 0.18f }, { P::lfo2Retrig, off },
         { P::mod1Src, msLfo2 }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.12f },
         { P::voiceMode, vmLegato }, { P::glide, 0.05f }, { P::velSens, 0.3f },
-        { P::choOn, on }, { P::choRate, 0.3f }, { P::choDepth, 0.4f }, { P::choMix, 0.25f },
+        { P::choOn, on }, { P::choRate, 0.3f }, { P::choDepth, 0.4f }, { P::choMix, 0.2f },
+        { P::masterGain, -1.5f },
     });
 
-    add (b, "Sub Floor", "Bass", "Pure sine sub. Layer it under anything.",
+    add (b, "Sub Floor", "Bass", "Pure sine sub at the played pitch. Layer it under anything.",
     {
-        { P::osc1Wave, wSine }, { P::osc1Oct, -1.0f }, { P::osc1Level, 1.0f },
+        { P::osc1Wave, wSine }, { P::osc1Level, 1.0f },
         { P::ampA, 0.004f }, { P::ampS, 1.0f }, { P::ampR, 0.12f },
         { P::voiceMode, vmMono }, { P::velSens, 0.2f },
         { P::drvOn, on }, { P::drvType, dSoft }, { P::drvAmt, 0.15f },
+        { P::masterGain, -2.0f },
     });
 
     add (b, "Rubber Pluck", "Bass", "Bouncy square bass with a snappy filter.",
     {
-        { P::osc1Wave, wSquare }, { P::osc1Oct, -1.0f }, { P::osc1Shape, 0.3f },
-        { P::subLevel, 0.4f },
-        { P::fltCutoff, 180.0f }, { P::fltReso, 0.35f }, { P::fltEnv, 0.42f }, { P::fltKey, 0.4f },
-        { P::ampD, 0.35f }, { P::ampS, 0.3f }, { P::ampR, 0.12f },
+        { P::osc1Wave, wSquare }, { P::osc1Shape, 0.3f },
+        { P::subLevel, 0.35f },
+        { P::fltCutoff, 260.0f }, { P::fltReso, 0.25f }, { P::fltEnv, 0.42f }, { P::fltKey, 0.4f },
+        { P::ampD, 0.35f }, { P::ampS, 0.5f }, { P::ampR, 0.12f },
         { P::fltD, 0.16f }, { P::fltS, 0.1f },
         { P::voiceMode, vmMono },
+        { P::masterGain, 3.0f },
     });
 
     add (b, "Dirty Square", "Bass", "Overdriven square bass with a square sub. Glides when played legato.",
     {
-        { P::osc1Wave, wSquare }, { P::osc1Oct, -1.0f },
+        { P::osc1Wave, wSquare },
         { P::subLevel, 0.6f }, { P::subWave, swSquare },
         { P::fltCutoff, 900.0f }, { P::fltReso, 0.25f }, { P::fltEnv, 0.2f },
         { P::ampS, 1.0f },
         { P::fltD, 0.25f },
         { P::voiceMode, vmLegato }, { P::glide, 0.06f }, { P::velSens, 0.3f },
         { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.55f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, 0.5f },
     });
 
     add (b, "Fat Mono", "Bass", "Classic analog mono bass: saw plus square into a driven low-pass.",
     {
-        { P::osc1Oct, -1.0f },
-        { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Oct, -1.0f }, { P::osc2Fine, 7.0f }, { P::osc2Shape, 0.2f },
+        { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Fine, 7.0f }, { P::osc2Shape, 0.2f },
         { P::subLevel, 0.45f },
-        { P::fltCutoff, 300.0f }, { P::fltReso, 0.3f }, { P::fltDrive, 0.4f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.5f },
+        { P::fltCutoff, 450.0f }, { P::fltReso, 0.3f }, { P::fltDrive, 0.4f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.5f },
         { P::fltD, 0.3f }, { P::fltS, 0.35f },
         { P::voiceMode, vmLegato }, { P::glide, 0.07f },
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.3f },
+        { P::masterGain, 0.5f },
     });
 
     // =======================================================================
@@ -204,7 +218,7 @@ Bank makeFactoryBank()
         { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.45f }, { P::drvMix, 0.7f },
         { P::choOn, on }, { P::choMix, 0.3f },
         { P::revOn, on }, { P::revSize, 0.35f }, { P::revMix, 0.14f },
-        { P::masterGain, -4.0f },
+        { P::masterGain, -2.0f },
     });
 
     add (b, "Hyper Rage", "Lead", "Brighter, thinner rage lead with a fifth on top and an eighth-note echo.",
@@ -217,50 +231,58 @@ Bank makeFactoryBank()
         { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.6f }, { P::drvMix, 0.75f },
         { P::choOn, on }, { P::choMix, 0.3f },
         { P::dlyOn, on }, { P::dlyDiv, d1_8 }, { P::dlyFb, 0.3f }, { P::dlyMix, 0.15f },
-        { P::masterGain, -5.0f },
+        { P::masterGain, -1.0f },
     });
 
-    add (b, "Dark Flute", "Lead", "Breathy, hollow flute for dark melodies. Legato with vibrato.",
+    add (b, "Dark Flute", "Lead", "Breathy, hollow flute for dark melodies. Legato; vibrato eases in on held notes.",
     {
         { P::osc1Wave, wTriangle },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.2f },
         { P::noiseLevel, 0.07f },
         { P::fltType, fLP12 }, { P::fltCutoff, 2200.0f }, { P::fltReso, 0.2f }, { P::fltEnv, 0.1f }, { P::fltKey, 0.6f },
         { P::ampA, 0.045f }, { P::ampD, 0.2f }, { P::ampS, 0.85f }, { P::ampR, 0.22f },
-        { P::fltA, 0.05f }, { P::fltD, 0.3f }, { P::fltS, 0.5f },
-        { P::lfo1Rate, 5.2f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.006f },
+        { P::fltA, 0.5f }, { P::fltD, 0.4f }, { P::fltS, 1.0f },
+        { P::lfo1Rate, 0.75f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0645f },
         { P::mod2Src, msVelocity }, { P::mod2Dst, mdCutoff }, { P::mod2Amt, 0.15f },
+        { P::mod3Src, msFltEnv }, { P::mod3Dst, mdLfo1Rate }, { P::mod3Amt, 0.95f },
+        { P::mod4Src, msKeyTrack }, { P::mod4Dst, mdLevel }, { P::mod4Amt, -0.5f },
         { P::voiceMode, vmLegato }, { P::glide, 0.035f },
         { P::dlyOn, on }, { P::dlyDiv, d1_4 }, { P::dlyMix, 0.12f },
         { P::revOn, on }, { P::revSize, 0.6f }, { P::revDamp, 0.6f }, { P::revMix, 0.28f },
+        { P::masterGain, 0.5f },
     });
 
-    add (b, "Night Whistle", "Lead", "Eerie sine whistle that scoops into each note.",
+    add (b, "Night Whistle", "Lead", "Eerie sine whistle that scoops into each note; vibrato eases in.",
     {
         { P::osc1Wave, wSine }, { P::osc1Level, 0.85f },
-        { P::noiseLevel, 0.04f },
+        { P::noiseLevel, 0.07f },
         { P::fltType, fLP12 }, { P::fltCutoff, 6000.0f },
         { P::ampA, 0.03f }, { P::ampS, 0.9f }, { P::ampR, 0.2f },
-        { P::pitchAmt, -2.0f }, { P::pitchDec, 0.06f },
-        { P::lfo1Rate, 5.8f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.008f },
+        { P::fltA, 0.45f }, { P::fltS, 1.0f },
+        { P::pitchAmt, -2.0f }, { P::pitchDec, 0.12f },
+        { P::lfo1Rate, 0.8f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0707f },
+        { P::mod2Src, msFltEnv }, { P::mod2Dst, mdLfo1Rate }, { P::mod2Amt, 0.92f },
+        { P::mod3Src, msKeyTrack }, { P::mod3Dst, mdLevel }, { P::mod3Amt, -0.5f },
         { P::voiceMode, vmLegato }, { P::glide, 0.06f },
         { P::dlyOn, on }, { P::dlyMix, 0.2f },
         { P::revOn, on }, { P::revSize, 0.55f }, { P::revMix, 0.3f },
+        { P::masterGain, -2.0f },
     });
 
-    add (b, "Block Siren", "Lead", "Slow pitch-sweeping siren. Hold a note and let it wail.",
+    add (b, "Block Siren", "Lead", "Slow siren sweeping about four semitones either side of the note. Hold it and let it wail.",
     {
         { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Fine, 6.0f }, { P::osc2Level, 0.5f },
         { P::fltType, fLP12 }, { P::fltCutoff, 5000.0f }, { P::fltReso, 0.3f },
         { P::ampA, 0.01f }, { P::ampS, 1.0f }, { P::ampR, 0.4f },
         { P::lfo1Wave, lTriangle }, { P::lfo1Rate, 0.45f },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.25f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.41f },
         { P::voiceMode, vmMono }, { P::velSens, 0.2f },
         { P::drvOn, on }, { P::drvType, dSoft }, { P::drvAmt, 0.3f },
         { P::dlyOn, on }, { P::dlyDiv, d1_4 }, { P::dlyFb, 0.45f }, { P::dlyMix, 0.3f },
         { P::revOn, on }, { P::revMix, 0.2f },
+        { P::masterGain, -4.0f },
     });
 
     add (b, "Glide Saws", "Lead", "Detuned saw lead that slides between overlapping notes.",
@@ -274,7 +296,7 @@ Bank makeFactoryBank()
         { P::choOn, on }, { P::choMix, 0.25f },
         { P::dlyOn, on }, { P::dlyMix, 0.22f },
         { P::revOn, on }, { P::revSize, 0.4f }, { P::revMix, 0.15f },
-        { P::masterGain, -2.0f },
+        { P::masterGain, -1.0f },
     });
 
     add (b, "Pixel Lead", "Lead", "Simple, slightly crunchy square lead for plugg melodies.",
@@ -283,9 +305,10 @@ Bank makeFactoryBank()
         { P::fltType, fLP12 }, { P::fltCutoff, 7000.0f },
         { P::ampD, 0.25f }, { P::ampS, 0.7f }, { P::ampR, 0.12f },
         { P::lfo1Rate, 6.0f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.004f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.05f },
         { P::drvOn, on }, { P::drvType, dCrush }, { P::drvAmt, 0.2f }, { P::drvMix, 0.3f },
         { P::dlyOn, on }, { P::dlyDiv, d1_8 }, { P::dlyFb, 0.3f }, { P::dlyMix, 0.2f },
+        { P::masterGain, -2.5f },
     });
 
     add (b, "Soft Sine", "Lead", "Mellow FM-tinted sine lead with glide, for melodic hooks.",
@@ -295,11 +318,13 @@ Bank makeFactoryBank()
         { P::oscFm, 0.18f },
         { P::ampA, 0.01f }, { P::ampS, 0.85f }, { P::ampR, 0.3f },
         { P::lfo1Rate, 5.0f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.005f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0577f },
+        { P::mod2Src, msKeyTrack }, { P::mod2Dst, mdLevel }, { P::mod2Amt, -0.5f },
         { P::voiceMode, vmLegato }, { P::glide, 0.08f },
         { P::choOn, on }, { P::choMix, 0.3f },
         { P::dlyOn, on }, { P::dlyDiv, d1_4D }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revMix, 0.25f },
+        { P::masterGain, -1.0f },
     });
 
     // =======================================================================
@@ -309,11 +334,13 @@ Bank makeFactoryBank()
     {
         { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.35f }, { P::osc2Shape, 0.25f },
         { P::fltCutoff, 350.0f }, { P::fltReso, 0.3f }, { P::fltEnv, 0.5f }, { P::fltKey, 0.6f },
-        { P::ampD, 0.45f }, { P::ampS, 0.0f }, { P::ampR, 0.35f },
-        { P::fltD, 0.2f }, { P::fltS, 0.0f },
+        { P::ampD, 1.2f }, { P::ampS, 0.0f }, { P::ampR, 0.35f },
+        { P::fltD, 0.45f }, { P::fltS, 0.0f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
         { P::velSens, 0.6f },
         { P::dlyOn, on }, { P::dlyMix, 0.25f },
         { P::revOn, on }, { P::revMix, 0.2f },
+        { P::masterGain, 4.5f },
     });
 
     add (b, "Cloud Pluck", "Pluck", "Soft, washed-out pluck that melts into reverb.",
@@ -321,24 +348,26 @@ Bank makeFactoryBank()
         { P::osc1Wave, wTriangle },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.4f },
         { P::fltType, fLP12 }, { P::fltCutoff, 900.0f }, { P::fltEnv, 0.3f },
-        { P::ampA, 0.004f }, { P::ampD, 0.7f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
-        { P::fltD, 0.35f }, { P::fltS, 0.0f }, { P::fltR, 0.5f },
+        { P::ampA, 0.004f }, { P::ampD, 1.4f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
+        { P::fltD, 0.5f }, { P::fltS, 0.0f }, { P::fltR, 0.5f },
+        { P::mod1Src, msKeyTrack }, { P::mod1Dst, mdLevel }, { P::mod1Amt, -0.6f },
         { P::choOn, on }, { P::choDepth, 0.6f }, { P::choMix, 0.45f },
         { P::dlyOn, on }, { P::dlyMix, 0.18f },
         { P::revOn, on }, { P::revSize, 0.75f }, { P::revMix, 0.35f },
+        { P::masterGain, 3.5f },
     });
 
     add (b, "Hyper Pluck", "Pluck", "Short supersaw stab for rage chords and arps.",
     {
         { P::osc1Wave, wSuperSaw }, { P::osc1Shape, 0.5f },
         { P::osc2On, on }, { P::osc2Wave, wSuperSaw }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.4f }, { P::osc2Shape, 0.55f },
-        { P::fltCutoff, 600.0f }, { P::fltEnv, 0.45f },
-        { P::ampD, 0.4f }, { P::ampS, 0.0f }, { P::ampR, 0.25f },
-        { P::fltD, 0.22f }, { P::fltS, 0.05f },
+        { P::fltCutoff, 1200.0f }, { P::fltEnv, 0.45f },
+        { P::ampD, 1.0f }, { P::ampS, 0.0f }, { P::ampR, 0.25f },
+        { P::fltD, 0.5f }, { P::fltS, 0.05f },
         { P::unison, 2.0f }, { P::uniSpread, 0.8f },
         { P::dlyOn, on }, { P::dlyDiv, d1_8 }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revSize, 0.4f }, { P::revMix, 0.18f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, 1.0f },
     });
 
     add (b, "Wood Pluck", "Pluck", "Marimba-like FM mallet; harder hits are brighter.",
@@ -346,24 +375,27 @@ Bank makeFactoryBank()
         { P::osc1Wave, wSine },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 2.0f }, { P::osc2Level, 0.1f },
         { P::oscFm, 0.1f },
-        { P::ampD, 0.5f }, { P::ampS, 0.0f }, { P::ampR, 0.3f },
-        { P::fltD, 0.12f }, { P::fltS, 0.0f },
+        { P::ampD, 1.1f }, { P::ampS, 0.0f }, { P::ampR, 0.3f },
+        { P::fltD, 0.15f }, { P::fltS, 0.0f },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.5f },
         { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.2f },
         { P::velSens, 0.6f },
-        { P::revOn, on }, { P::revSize, 0.3f }, { P::revMix, 0.15f },
+        { P::revOn, on }, { P::revSize, 0.3f }, { P::revMix, 0.22f },
+        { P::masterGain, 1.0f },
     });
 
     add (b, "Pick Wire", "Pluck", "Thin, nasal plucked string with a fast echo.",
     {
         { P::osc1Wave, wSquare }, { P::osc1Shape, 0.8f },
         { P::osc2On, on }, { P::osc2Fine, 5.0f }, { P::osc2Level, 0.3f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 1200.0f }, { P::fltReso, 0.35f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.7f },
-        { P::ampD, 0.3f }, { P::ampS, 0.0f }, { P::ampR, 0.2f },
-        { P::fltD, 0.12f }, { P::fltS, 0.0f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 1200.0f }, { P::fltReso, 0.15f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.7f },
+        { P::ampD, 0.9f }, { P::ampS, 0.0f }, { P::ampR, 0.2f },
+        { P::fltD, 0.3f }, { P::fltS, 0.0f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
         { P::velSens, 0.6f },
         { P::dlyOn, on }, { P::dlyDiv, d1_16 }, { P::dlyFb, 0.3f }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revSize, 0.3f }, { P::revMix, 0.12f },
+        { P::masterGain, 1.5f },
     });
 
     // =======================================================================
@@ -376,16 +408,17 @@ Bank makeFactoryBank()
         { P::osc3On, on }, { P::osc3Wave, wTriangle }, { P::osc3Level, 0.25f },
         { P::noiseLevel, 0.02f }, { P::oscFm, 0.08f },
         { P::fltType, fLP12 }, { P::fltCutoff, 3200.0f },
-        { P::ampA, 0.003f }, { P::ampD, 1.6f }, { P::ampS, 0.25f }, { P::ampR, 0.35f },
+        { P::ampA, 0.003f }, { P::ampD, 3.5f }, { P::ampS, 0.0f }, { P::ampR, 0.4f },
         { P::fltD, 0.25f }, { P::fltS, 0.0f },
         { P::lfo2Rate, 0.7f }, { P::lfo2Retrig, off },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.3f },
         { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.25f },
-        { P::mod3Src, msLfo2 }, { P::mod3Dst, mdPitch }, { P::mod3Amt, 0.0025f },
+        { P::mod3Src, msLfo2 }, { P::mod3Dst, mdPitch }, { P::mod3Amt, 0.05f },
         { P::velSens, 0.7f },
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.35f }, { P::drvMix, 0.6f },
         { P::choOn, on }, { P::choRate, 0.35f }, { P::choDepth, 0.55f }, { P::choMix, 0.35f },
         { P::revOn, on }, { P::revSize, 0.35f }, { P::revMix, 0.12f },
+        { P::masterGain, -5.0f },
     });
 
     add (b, "Glass Keys", "Keys", "Clean, glassy digital keys with a bright attack.",
@@ -394,13 +427,15 @@ Bank makeFactoryBank()
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Semi, 7.0f }, { P::osc2Level, 0.15f },
         { P::osc3On, on }, { P::osc3Wave, wTriangle }, { P::osc3Oct, 1.0f }, { P::osc3Level, 0.2f },
         { P::oscFm, 0.2f },
-        { P::ampD, 1.2f }, { P::ampS, 0.3f }, { P::ampR, 0.5f },
+        { P::ampD, 3.0f }, { P::ampS, 0.0f }, { P::ampR, 0.5f },
         { P::fltD, 0.4f }, { P::fltS, 0.1f },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.35f },
+        { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.2f },
         { P::velSens, 0.6f },
         { P::choOn, on },
         { P::dlyOn, on }, { P::dlyMix, 0.12f },
         { P::revOn, on }, { P::revMix, 0.22f },
+        { P::masterGain, -5.5f },
     });
 
     add (b, "Sunday Organ", "Keys", "Drawbar-style organ: three sines, a sub and a fast chorus.",
@@ -414,6 +449,7 @@ Bank makeFactoryBank()
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.25f },
         { P::choOn, on }, { P::choRate, 6.0f }, { P::choDepth, 0.3f }, { P::choMix, 0.4f },
         { P::revOn, on }, { P::revSize, 0.45f }, { P::revMix, 0.18f },
+        { P::masterGain, -10.0f },
     });
 
     // =======================================================================
@@ -424,12 +460,13 @@ Bank makeFactoryBank()
         { P::osc1Level, 0.6f },
         { P::osc2On, on }, { P::osc2Wave, wTriangle }, { P::osc2Fine, 3.0f },
         { P::osc3On, on }, { P::osc3Oct, 1.0f }, { P::osc3Fine, -4.0f }, { P::osc3Level, 0.15f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 700.0f }, { P::fltEnv, 0.32f }, { P::fltKey, 0.7f },
-        { P::ampA, 0.001f }, { P::ampD, 3.2f }, { P::ampS, 0.0f }, { P::ampR, 0.35f },
-        { P::fltD, 0.9f }, { P::fltS, 0.05f }, { P::fltR, 0.35f },
-        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 350.0f }, { P::fltEnv, 0.2f }, { P::fltKey, 0.7f },
+        { P::ampA, 0.001f }, { P::ampD, 5.5f }, { P::ampS, 0.0f }, { P::ampR, 0.35f },
+        { P::fltD, 1.4f }, { P::fltS, 0.05f }, { P::fltR, 0.35f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.6f },
         { P::velSens, 0.8f },
         { P::revOn, on }, { P::revSize, 0.45f }, { P::revMix, 0.18f },
+        { P::masterGain, -5.0f },
     });
 
     add (b, "Upright", "Piano", "Upright-style piano: shorter, a little out of tune, close and boxy.",
@@ -437,13 +474,14 @@ Bank makeFactoryBank()
         { P::osc1Fine, -5.0f }, { P::osc1Level, 0.6f },
         { P::osc2On, on }, { P::osc2Fine, 9.0f }, { P::osc2Level, 0.5f },
         { P::osc3On, on }, { P::osc3Wave, wTriangle }, { P::osc3Level, 0.5f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 1100.0f }, { P::fltReso, 0.2f }, { P::fltEnv, 0.28f }, { P::fltKey, 0.7f },
-        { P::ampA, 0.001f }, { P::ampD, 2.0f }, { P::ampS, 0.0f }, { P::ampR, 0.25f },
-        { P::fltD, 0.5f }, { P::fltS, 0.05f },
-        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.25f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 600.0f }, { P::fltReso, 0.35f }, { P::fltEnv, 0.2f }, { P::fltKey, 0.7f },
+        { P::ampA, 0.001f }, { P::ampD, 3.5f }, { P::ampS, 0.0f }, { P::ampR, 0.25f },
+        { P::fltD, 0.8f }, { P::fltS, 0.05f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.5f },
         { P::velSens, 0.8f },
         { P::choOn, on }, { P::choRate, 0.4f }, { P::choDepth, 0.3f }, { P::choMix, 0.2f },
         { P::revOn, on }, { P::revSize, 0.3f }, { P::revMix, 0.12f },
+        { P::masterGain, -3.0f },
     });
 
     add (b, "Soft Felt", "Piano", "Felt-piano impression: muted, close and quiet, with a hint of hammer noise.",
@@ -451,26 +489,29 @@ Bank makeFactoryBank()
         { P::osc1Wave, wTriangle },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Level, 0.5f },
         { P::noiseLevel, 0.015f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 500.0f }, { P::fltEnv, 0.15f }, { P::fltKey, 0.6f },
-        { P::ampA, 0.006f }, { P::ampD, 2.6f }, { P::ampS, 0.0f }, { P::ampR, 0.5f },
-        { P::fltD, 0.6f }, { P::fltS, 0.0f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 380.0f }, { P::fltEnv, 0.12f }, { P::fltKey, 0.6f },
+        { P::ampA, 0.006f }, { P::ampD, 3.8f }, { P::ampS, 0.0f }, { P::ampR, 0.5f },
+        { P::fltD, 0.8f }, { P::fltS, 0.0f },
         { P::lfo2Rate, 0.4f }, { P::lfo2Retrig, off },
-        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.2f },
-        { P::mod2Src, msLfo2 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.0015f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.4f },
+        { P::mod2Src, msLfo2 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.0354f },
+        { P::mod3Src, msKeyTrack }, { P::mod3Dst, mdLevel }, { P::mod3Amt, -0.6f },
         { P::velSens, 0.7f },
         { P::revOn, on }, { P::revMix, 0.3f },
+        { P::masterGain, -7.5f },
     });
 
     add (b, "Dark Piano", "Piano", "Low-passed, roomy piano-style keys for dark trap melodies.",
     {
         { P::osc1Level, 0.6f },
         { P::osc2On, on }, { P::osc2Wave, wTriangle }, { P::osc2Fine, 4.0f }, { P::osc2Level, 0.7f },
-        { P::fltCutoff, 450.0f }, { P::fltEnv, 0.25f }, { P::fltKey, 0.6f },
-        { P::ampA, 0.001f }, { P::ampD, 3.5f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
-        { P::fltD, 1.2f }, { P::fltS, 0.05f }, { P::fltR, 0.6f },
-        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.25f },
+        { P::fltCutoff, 300.0f }, { P::fltEnv, 0.2f }, { P::fltKey, 0.6f },
+        { P::ampA, 0.001f }, { P::ampD, 5.0f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
+        { P::fltD, 1.5f }, { P::fltS, 0.05f }, { P::fltR, 0.6f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.5f },
         { P::velSens, 0.7f },
         { P::revOn, on }, { P::revSize, 0.7f }, { P::revDamp, 0.7f }, { P::revMix, 0.3f },
+        { P::masterGain, -6.0f },
     });
 
     // =======================================================================
@@ -486,36 +527,42 @@ Bank makeFactoryBank()
         { P::ampA, 0.001f }, { P::ampD, 2.2f }, { P::ampS, 0.0f }, { P::ampR, 1.8f },
         { P::fltD, 1.2f }, { P::fltS, 0.0f }, { P::fltR, 1.2f },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.3f },
+        { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.15f },
         { P::velSens, 0.6f },
         { P::dlyOn, on }, { P::dlyDiv, d1_4D }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revSize, 0.8f }, { P::revDamp, 0.7f }, { P::revMix, 0.35f },
+        { P::masterGain, -1.5f },
     });
 
     add (b, "Music Box", "Bell", "Tiny, delicate music-box tines. Sweetest in the upper octaves.",
     {
         { P::osc1Wave, wSine }, { P::osc1Oct, 1.0f },
-        { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 3.0f }, { P::osc2Level, 0.12f },
+        { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 2.0f }, { P::osc2Semi, 8.0f }, { P::osc2Level, 0.12f },
         { P::oscFm, 0.15f },
-        { P::ampA, 0.001f }, { P::ampD, 0.9f }, { P::ampS, 0.0f }, { P::ampR, 0.8f },
+        { P::ampA, 0.001f }, { P::ampD, 1.3f }, { P::ampS, 0.0f }, { P::ampR, 0.8f },
         { P::fltD, 0.15f }, { P::fltS, 0.0f },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.25f },
+        { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.15f },
         { P::velSens, 0.7f },
         { P::dlyOn, on }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revMix, 0.25f },
+        { P::masterGain, 1.5f },
     });
 
     add (b, "Ice Bell", "Bell", "Cold, shimmering bell with a wide chorus.",
     {
         { P::osc1Wave, wSine },
-        { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Semi, 7.0f }, { P::osc2Level, 0.25f },
+        { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Semi, 10.0f }, { P::osc2Level, 0.25f },
         { P::osc3On, on }, { P::osc3Wave, wTriangle }, { P::osc3Oct, 2.0f }, { P::osc3Fine, 8.0f }, { P::osc3Level, 0.15f },
-        { P::oscFm, 0.22f },
+        { P::oscFm, 0.3f },
         { P::fltType, fHP12 }, { P::fltCutoff, 250.0f },
         { P::ampA, 0.001f }, { P::ampD, 1.6f }, { P::ampS, 0.0f }, { P::ampR, 1.4f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.15f },
         { P::velSens, 0.6f },
         { P::choOn, on },
         { P::dlyOn, on }, { P::dlyMix, 0.18f },
         { P::revOn, on }, { P::revSize, 0.7f }, { P::revDamp, 0.25f }, { P::revMix, 0.35f },
+        { P::masterGain, 1.0f },
     });
 
     add (b, "Chapel Bell", "Bell", "Big, slow tubular bell for intros and breakdowns.",
@@ -523,12 +570,14 @@ Bank makeFactoryBank()
         { P::osc1Wave, wSine },
         { P::osc2On, on }, { P::osc2Wave, wSine }, { P::osc2Oct, 1.0f }, { P::osc2Semi, 5.0f }, { P::osc2Level, 0.2f },
         { P::oscFm, 0.5f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 6000.0f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 6000.0f }, { P::fltKey, 0.4f },
         { P::ampA, 0.001f }, { P::ampD, 3.5f }, { P::ampS, 0.0f }, { P::ampR, 3.0f },
         { P::fltD, 2.5f }, { P::fltS, 0.0f }, { P::fltR, 2.5f },
         { P::mod1Src, msFltEnv }, { P::mod1Dst, mdFm }, { P::mod1Amt, 0.25f },
+        { P::mod2Src, msVelocity }, { P::mod2Dst, mdFm }, { P::mod2Amt, 0.15f },
         { P::velSens, 0.6f },
         { P::revOn, on }, { P::revSize, 0.85f }, { P::revMix, 0.4f },
+        { P::masterGain, -4.5f },
     });
 
     // =======================================================================
@@ -540,6 +589,7 @@ Bank makeFactoryBank()
         { P::fltCutoff, 600.0f }, { P::fltReso, 0.2f }, { P::fltEnv, 0.4f }, { P::fltKey, 0.5f },
         { P::ampD, 0.4f }, { P::ampS, 0.5f }, { P::ampR, 0.2f },
         { P::fltD, 0.25f }, { P::fltS, 0.2f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
         { P::unison, 2.0f }, { P::velSens, 0.6f },
         { P::choOn, on }, { P::choMix, 0.3f },
         { P::revOn, on }, { P::revSize, 0.4f }, { P::revMix, 0.16f },
@@ -557,7 +607,7 @@ Bank makeFactoryBank()
         { P::unison, 2.0f }, { P::uniDetune, 0.25f }, { P::uniSpread, 0.8f },
         { P::choOn, on },
         { P::revOn, on }, { P::revMix, 0.2f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, -8.0f },
     });
 
     add (b, "PWM Poly", "Synth", "Two pulse waves with slow pulse-width motion: warm, moving chords.",
@@ -571,6 +621,7 @@ Bank makeFactoryBank()
         { P::mod1Src, msLfo1 }, { P::mod1Dst, mdShape }, { P::mod1Amt, 0.3f },
         { P::choOn, on }, { P::choMix, 0.35f },
         { P::revOn, on }, { P::revMix, 0.2f },
+        { P::masterGain, -10.5f },
     });
 
     add (b, "Wide Chords", "Synth", "Soft-edged supersaw chords, wide and smooth rather than aggressive.",
@@ -582,7 +633,7 @@ Bank makeFactoryBank()
         { P::unison, 2.0f }, { P::uniDetune, 0.15f }, { P::uniSpread, 0.9f },
         { P::choOn, on },
         { P::revOn, on }, { P::revMix, 0.3f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, -5.0f },
     });
 
     // =======================================================================
@@ -601,6 +652,7 @@ Bank makeFactoryBank()
         { P::unison, 2.0f }, { P::uniDetune, 0.3f }, { P::uniSpread, 0.9f }, { P::velSens, 0.2f },
         { P::choOn, on }, { P::choRate, 0.25f }, { P::choDepth, 0.6f }, { P::choMix, 0.45f },
         { P::revOn, on }, { P::revSize, 0.85f }, { P::revDamp, 0.65f }, { P::revMix, 0.4f },
+        { P::masterGain, -9.5f },
     });
 
     add (b, "Air Choir", "Pad", "Breathy, vowel-like choir pad with slow pulse-width motion.",
@@ -608,29 +660,33 @@ Bank makeFactoryBank()
         { P::osc1Wave, wSquare }, { P::osc1Shape, 0.35f },
         { P::osc2On, on }, { P::osc2Fine, 8.0f }, { P::osc2Level, 0.45f },
         { P::noiseLevel, 0.06f },
-        { P::fltType, fBP12 }, { P::fltCutoff, 950.0f }, { P::fltReso, 0.4f }, { P::fltKey, 0.3f },
+        { P::fltType, fBP12 }, { P::fltCutoff, 950.0f }, { P::fltReso, 0.4f }, { P::fltKey, 0.5f },
         { P::ampA, 0.5f }, { P::ampD, 0.8f }, { P::ampS, 0.85f }, { P::ampR, 1.6f },
         { P::lfo1Rate, 0.35f }, { P::lfo1Retrig, off },
         { P::lfo2Rate, 5.0f }, { P::lfo2Retrig, off },
         { P::mod1Src, msLfo1 }, { P::mod1Dst, mdShape }, { P::mod1Amt, 0.2f },
-        { P::mod2Src, msLfo2 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.003f },
+        { P::mod2Src, msLfo2 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.0456f },
+        { P::mod3Src, msKeyTrack }, { P::mod3Dst, mdLevel }, { P::mod3Amt, -0.5f },
         { P::unison, 3.0f }, { P::uniDetune, 0.25f }, { P::uniSpread, 0.9f }, { P::velSens, 0.2f },
         { P::choOn, on }, { P::choMix, 0.5f },
         { P::revOn, on }, { P::revSize, 0.8f }, { P::revMix, 0.42f },
+        { P::masterGain, -6.0f },
     });
 
     add (b, "Thin Air", "Pad", "High, airy supersaw haze with no low end. Sits above the 808.",
     {
         { P::osc1Wave, wSuperSaw }, { P::osc1Oct, 1.0f }, { P::osc1Level, 0.6f }, { P::osc1Shape, 0.45f },
         { P::noiseLevel, 0.1f },
-        { P::fltType, fHP12 }, { P::fltCutoff, 700.0f }, { P::fltReso, 0.15f },
+        { P::fltType, fHP12 }, { P::fltCutoff, 700.0f }, { P::fltReso, 0.15f }, { P::fltKey, 0.4f },
         { P::ampA, 1.2f }, { P::ampS, 0.9f }, { P::ampR, 3.0f },
         { P::lfo2Rate, 0.2f }, { P::lfo2Retrig, off },
         { P::mod1Src, msLfo2 }, { P::mod1Dst, mdPan }, { P::mod1Amt, 0.35f },
+        { P::mod2Src, msKeyTrack }, { P::mod2Dst, mdLevel }, { P::mod2Amt, -0.5f },
         { P::velSens, 0.2f },
         { P::choOn, on },
         { P::dlyOn, on }, { P::dlyMix, 0.15f },
         { P::revOn, on }, { P::revSize, 0.9f }, { P::revDamp, 0.2f }, { P::revMix, 0.5f },
+        { P::masterGain, -8.5f },
     });
 
     add (b, "Warm Blanket", "Pad", "Soft, rounded analog pad for chords.",
@@ -644,6 +700,7 @@ Bank makeFactoryBank()
         { P::unison, 2.0f }, { P::uniDetune, 0.15f }, { P::velSens, 0.3f },
         { P::choOn, on }, { P::choRate, 0.5f },
         { P::revOn, on }, { P::revSize, 0.6f }, { P::revMix, 0.3f },
+        { P::masterGain, -9.5f },
     });
 
     add (b, "Ghost Tape", "Pad", "Wobbly, degraded tape pad with wow, flutter and hiss.",
@@ -655,69 +712,75 @@ Bank makeFactoryBank()
         { P::ampA, 0.6f }, { P::ampS, 0.85f }, { P::ampR, 2.0f },
         { P::lfo1Wave, lSampleHold }, { P::lfo1Rate, 7.0f }, { P::lfo1Retrig, off },
         { P::lfo2Rate, 0.6f }, { P::lfo2Retrig, off },
-        { P::mod1Src, msLfo2 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.004f },
-        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.0012f },
+        { P::mod1Src, msLfo2 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0645f },
+        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdPitch }, { P::mod2Amt, 0.0408f },
+        { P::mod3Src, msKeyTrack }, { P::mod3Dst, mdLevel }, { P::mod3Amt, -0.6f },
         { P::velSens, 0.3f },
         { P::drvOn, on }, { P::drvType, dCrush }, { P::drvAmt, 0.3f }, { P::drvMix, 0.35f },
         { P::choOn, on },
         { P::revOn, on }, { P::revSize, 0.7f }, { P::revMix, 0.38f },
+        { P::masterGain, -9.5f },
     });
 
     // =======================================================================
     //  Pulse  (tempo-synced, rhythmic)
     // =======================================================================
-    add (b, "Gate Pad", "Pulse", "Trance-gated saw pad chopping in sixteenths with the host tempo.",
+    add (b, "Gate Pad", "Pulse", "Trance-gated saw pad chopping in sixteenths at the host tempo. The gate restarts with each note, so play on the grid.",
     {
         { P::osc1Fine, -9.0f },
         { P::osc2On, on }, { P::osc2Fine, 9.0f }, { P::osc2Level, 0.75f },
         { P::fltType, fLP12 }, { P::fltCutoff, 2500.0f }, { P::fltKey, 0.3f },
         { P::ampA, 0.05f }, { P::ampS, 0.9f }, { P::ampR, 0.6f },
-        { P::lfo1Wave, lSquare }, { P::lfo1Sync, on }, { P::lfo1Div, d1_16 }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 0.5f },
+        { P::lfo1Wave, lSquare }, { P::lfo1Sync, on }, { P::lfo1Div, d1_16 },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 1.0f },
         { P::unison, 2.0f }, { P::uniSpread, 0.9f }, { P::velSens, 0.2f },
         { P::choOn, on },
-        { P::dlyOn, on }, { P::dlyMix, 0.2f },
-        { P::revOn, on }, { P::revSize, 0.6f }, { P::revMix, 0.3f },
+        { P::dlyOn, on }, { P::dlyMix, 0.12f },
+        { P::revOn, on }, { P::revSize, 0.6f }, { P::revMix, 0.18f },
+        { P::masterGain, -12.5f },
     });
 
-    add (b, "Pulse Bass", "Pulse", "Mono bass whose filter pulses in eighth notes. Hold a note and it grooves.",
+    add (b, "Pulse Bass", "Pulse", "Mono bass whose filter and level pulse in eighth notes. Hold a note and it grooves.",
     {
-        { P::osc1Oct, -1.0f },
-        { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Oct, -1.0f }, { P::osc2Fine, 6.0f }, { P::osc2Level, 0.5f }, { P::osc2Shape, 0.2f },
+        { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Fine, 6.0f }, { P::osc2Level, 0.5f }, { P::osc2Shape, 0.2f },
         { P::subLevel, 0.5f },
-        { P::fltCutoff, 250.0f }, { P::fltReso, 0.35f }, { P::fltDrive, 0.3f }, { P::fltKey, 0.4f },
+        { P::fltCutoff, 420.0f }, { P::fltReso, 0.35f }, { P::fltDrive, 0.3f }, { P::fltKey, 0.4f },
         { P::ampS, 1.0f },
         { P::lfo1Wave, lSaw }, { P::lfo1Sync, on }, { P::lfo1Div, d1_8 },
         { P::mod1Src, msLfo1 }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.4f },
+        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdLevel }, { P::mod2Amt, 0.6f },
         { P::voiceMode, vmMono }, { P::velSens, 0.3f },
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.4f },
+        { P::masterGain, -3.0f },
     });
 
-    add (b, "Echo Pulse", "Pulse", "Short pluck turned into a rhythm by a loud dotted ping-pong echo.",
+    add (b, "Echo Pulse", "Pulse", "Held notes are re-plucked every quarter note; a dotted ping-pong echo fills the gaps.",
     {
         { P::osc1Wave, wSquare }, { P::osc1Shape, 0.25f },
         { P::osc2On, on }, { P::osc2Oct, 1.0f }, { P::osc2Level, 0.3f },
-        { P::fltCutoff, 500.0f }, { P::fltReso, 0.3f }, { P::fltEnv, 0.4f }, { P::fltKey, 0.6f },
-        { P::ampD, 0.25f }, { P::ampS, 0.0f }, { P::ampR, 0.2f },
-        { P::fltD, 0.15f }, { P::fltS, 0.0f },
-        { P::lfo2Sync, on }, { P::lfo2Div, d1_2 }, { P::lfo2Retrig, off },
-        { P::mod1Src, msLfo2 }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.15f },
+        { P::fltCutoff, 900.0f }, { P::fltReso, 0.3f }, { P::fltKey, 0.6f },
+        { P::ampD, 0.3f }, { P::ampS, 0.9f }, { P::ampR, 0.25f },
+        { P::lfo1Wave, lSaw }, { P::lfo1Sync, on }, { P::lfo1Div, d1_4 },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 1.0f },
+        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdCutoff }, { P::mod2Amt, 0.4f },
         { P::dlyOn, on }, { P::dlyFb, 0.6f }, { P::dlyMix, 0.4f },
         { P::revOn, on }, { P::revSize, 0.4f }, { P::revMix, 0.15f },
+        { P::masterGain, -11.0f },
     });
 
-    add (b, "Side Pump", "Pulse", "Warm pad that ducks every quarter note, like sidechain compression to a kick.",
+    add (b, "Side Pump", "Pulse", "Warm pad that ducks on every quarter note and swells back, like sidechain compression to a kick.",
     {
         { P::osc1Wave, wTriangle }, { P::osc1Shape, 0.15f },
         { P::osc2On, on }, { P::osc2Fine, 7.0f }, { P::osc2Level, 0.5f },
         { P::subLevel, 0.25f },
         { P::fltType, fLP12 }, { P::fltCutoff, 1800.0f }, { P::fltKey, 0.4f },
         { P::ampA, 0.2f }, { P::ampS, 0.9f }, { P::ampR, 1.0f },
-        { P::lfo1Wave, lSaw }, { P::lfo1Sync, on }, { P::lfo1Div, d1_4 }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 0.5f },
+        { P::lfo1Wave, lSaw }, { P::lfo1Sync, on }, { P::lfo1Div, d1_4 },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, -0.9f },
         { P::unison, 2.0f }, { P::uniDetune, 0.15f }, { P::velSens, 0.2f },
         { P::choOn, on },
         { P::revOn, on }, { P::revSize, 0.6f }, { P::revMix, 0.28f },
+        { P::masterGain, -11.5f },
     });
 
     // =======================================================================
@@ -727,14 +790,14 @@ Bank makeFactoryBank()
     {
         { P::osc2On, on }, { P::osc2Fine, 10.0f }, { P::osc2Level, 0.7f },
         { P::osc3On, on }, { P::osc3Oct, -1.0f }, { P::osc3Level, 0.4f },
-        { P::fltCutoff, 450.0f }, { P::fltReso, 0.15f }, { P::fltEnv, 0.42f }, { P::fltKey, 0.5f },
+        { P::fltCutoff, 450.0f }, { P::fltReso, 0.15f }, { P::fltEnv, 0.34f }, { P::fltKey, 0.5f },
         { P::ampA, 0.012f }, { P::ampS, 0.8f }, { P::ampR, 0.14f },
         { P::fltA, 0.025f }, { P::fltD, 0.28f }, { P::fltS, 0.45f }, { P::fltR, 0.15f },
-        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.2f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.4f },
         { P::unison, 2.0f }, { P::velSens, 0.6f },
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.3f },
         { P::revOn, on }, { P::revSize, 0.35f }, { P::revMix, 0.14f },
-        { P::masterGain, -2.0f },
+        { P::masterGain, -6.0f },
     });
 
     add (b, "War Horns", "Brass", "Low, cinematic horn section that swells into each note.",
@@ -745,10 +808,11 @@ Bank makeFactoryBank()
         { P::fltCutoff, 280.0f }, { P::fltEnv, 0.38f }, { P::fltKey, 0.4f },
         { P::ampA, 0.07f }, { P::ampD, 0.5f }, { P::ampS, 0.9f }, { P::ampR, 0.45f },
         { P::fltA, 0.12f }, { P::fltD, 0.6f }, { P::fltS, 0.6f }, { P::fltR, 0.4f },
+        { P::mod1Src, msKeyTrack }, { P::mod1Dst, mdLevel }, { P::mod1Amt, -0.6f },
         { P::unison, 2.0f }, { P::uniSpread, 0.7f },
         { P::drvOn, on }, { P::drvType, dTube }, { P::drvAmt, 0.35f },
         { P::revOn, on }, { P::revSize, 0.8f }, { P::revMix, 0.32f },
-        { P::masterGain, -2.0f },
+        { P::masterGain, -6.5f },
     });
 
     add (b, "Gold Brass", "Brass", "Smooth, chorused poly brass for chords.",
@@ -758,9 +822,11 @@ Bank makeFactoryBank()
         { P::ampA, 0.03f }, { P::ampS, 0.85f }, { P::ampR, 0.3f },
         { P::fltA, 0.05f }, { P::fltD, 0.5f }, { P::fltS, 0.55f }, { P::fltR, 0.3f },
         { P::lfo1Rate, 5.0f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.003f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.05f },
+        { P::mod2Src, msVelocity }, { P::mod2Dst, mdCutoff }, { P::mod2Amt, 0.3f },
         { P::choOn, on }, { P::choMix, 0.3f },
         { P::revOn, on }, { P::revMix, 0.2f },
+        { P::masterGain, -8.0f },
     });
 
     // =======================================================================
@@ -769,11 +835,13 @@ Bank makeFactoryBank()
     add (b, "Pizzi", "Strings", "Plucked, pizzicato-style strings in a small room.",
     {
         { P::osc2On, on }, { P::osc2Oct, 1.0f }, { P::osc2Fine, 4.0f }, { P::osc2Level, 0.3f },
-        { P::fltCutoff, 500.0f }, { P::fltReso, 0.15f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.6f },
-        { P::ampA, 0.001f }, { P::ampD, 0.22f }, { P::ampS, 0.0f }, { P::ampR, 0.18f },
-        { P::fltD, 0.1f }, { P::fltS, 0.0f },
+        { P::fltCutoff, 650.0f }, { P::fltReso, 0.15f }, { P::fltEnv, 0.35f }, { P::fltKey, 0.6f },
+        { P::ampA, 0.001f }, { P::ampD, 0.6f }, { P::ampS, 0.0f }, { P::ampR, 0.3f },
+        { P::fltD, 0.22f }, { P::fltS, 0.0f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
         { P::velSens, 0.7f },
         { P::revOn, on }, { P::revSize, 0.4f }, { P::revDamp, 0.4f }, { P::revMix, 0.22f },
+        { P::masterGain, 4.5f },
     });
 
     add (b, "Slow Strings", "Strings", "Lush, slow-bowed string ensemble.",
@@ -785,22 +853,24 @@ Bank makeFactoryBank()
         { P::ampA, 0.35f }, { P::ampD, 0.6f }, { P::ampS, 0.9f }, { P::ampR, 0.9f },
         { P::fltA, 0.5f }, { P::fltS, 0.7f },
         { P::lfo1Rate, 5.3f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0025f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.05f },
         { P::unison, 3.0f }, { P::uniDetune, 0.22f }, { P::uniSpread, 0.85f }, { P::velSens, 0.3f },
         { P::choOn, on }, { P::choRate, 0.6f },
         { P::revOn, on }, { P::revSize, 0.65f }, { P::revMix, 0.3f },
-        { P::masterGain, -2.0f },
+        { P::masterGain, -10.0f },
     });
 
     add (b, "Spiccato", "Strings", "Short, bouncing string hits for tense, orchestral patterns.",
     {
         { P::osc1Fine, -7.0f },
         { P::osc2On, on }, { P::osc2Fine, 7.0f }, { P::osc2Level, 0.7f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 1800.0f }, { P::fltEnv, 0.25f }, { P::fltKey, 0.5f },
-        { P::ampA, 0.008f }, { P::ampD, 0.28f }, { P::ampS, 0.25f }, { P::ampR, 0.2f },
-        { P::fltD, 0.15f }, { P::fltS, 0.2f },
-        { P::unison, 2.0f }, { P::velSens, 0.7f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 2500.0f }, { P::fltEnv, 0.25f }, { P::fltKey, 0.5f },
+        { P::ampA, 0.015f }, { P::ampD, 0.6f }, { P::ampS, 0.0f }, { P::ampR, 0.25f },
+        { P::fltD, 0.3f }, { P::fltS, 0.0f },
+        { P::mod1Src, msVelocity }, { P::mod1Dst, mdCutoff }, { P::mod1Amt, 0.3f },
+        { P::unison, 2.0f }, { P::uniDetune, 0.3f }, { P::uniSpread, 0.8f }, { P::velSens, 0.7f },
         { P::revOn, on }, { P::revMix, 0.25f },
+        { P::masterGain, -0.5f },
     });
 
     add (b, "Tense Tremolo", "Strings", "Fast tremolo strings for suspense and build-ups.",
@@ -810,44 +880,49 @@ Bank makeFactoryBank()
         { P::fltType, fLP12 }, { P::fltCutoff, 2600.0f }, { P::fltKey, 0.4f },
         { P::ampA, 0.12f }, { P::ampS, 0.9f }, { P::ampR, 0.5f },
         { P::lfo1Wave, lTriangle }, { P::lfo1Rate, 11.0f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 0.3f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdLevel }, { P::mod1Amt, 0.6f },
         { P::unison, 3.0f }, { P::uniDetune, 0.22f }, { P::uniSpread, 0.85f }, { P::velSens, 0.3f },
         { P::choOn, on },
         { P::revOn, on }, { P::revSize, 0.6f }, { P::revMix, 0.28f },
-        { P::masterGain, -2.0f },
+        { P::masterGain, -9.5f },
     });
 
-    add (b, "Solo Cello", "Strings", "Cello-style solo string: mono, legato slides and a slow vibrato.",
+    add (b, "Solo Cello", "Strings", "Cello-style solo string: mono, legato slides and a vibrato that eases in.",
     {
         { P::osc1Oct, -1.0f },
         { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Oct, -1.0f }, { P::osc2Level, 0.25f }, { P::osc2Shape, 0.3f },
-        { P::fltType, fLP12 }, { P::fltCutoff, 1500.0f }, { P::fltReso, 0.25f }, { P::fltEnv, 0.1f }, { P::fltKey, 0.5f },
+        { P::fltType, fLP12 }, { P::fltCutoff, 1500.0f }, { P::fltReso, 0.25f }, { P::fltEnv, 0.08f }, { P::fltKey, 0.5f },
         { P::ampA, 0.09f }, { P::ampS, 0.9f }, { P::ampR, 0.3f },
-        { P::fltA, 0.2f }, { P::fltS, 0.6f },
-        { P::lfo1Rate, 5.5f }, { P::lfo1Retrig, off },
-        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.004f },
+        { P::fltA, 0.35f }, { P::fltD, 0.3f }, { P::fltS, 1.0f },
+        { P::lfo1Rate, 0.8f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, 0.0645f },
+        { P::mod2Src, msFltEnv }, { P::mod2Dst, mdLfo1Rate }, { P::mod2Amt, 0.92f },
+        { P::mod3Src, msKeyTrack }, { P::mod3Dst, mdLevel }, { P::mod3Amt, -0.6f },
         { P::voiceMode, vmLegato }, { P::glide, 0.05f },
         { P::revOn, on }, { P::revSize, 0.55f }, { P::revMix, 0.3f },
+        { P::masterGain, -0.5f },
     });
 
     // =======================================================================
     //  FX
     // =======================================================================
-    add (b, "Rise Up", "FX", "Four-second riser: hold a note, pitch and filter climb into the drop.",
+    add (b, "Rise Up", "FX", "Four-second riser: hold a note while pitch (two octaves), filter and level climb into the drop.",
     {
-        { P::osc1Wave, wSuperSaw }, { P::osc1Shape, 0.6f },
+        { P::osc1Wave, wSuperSaw }, { P::osc1Oct, -1.0f }, { P::osc1Shape, 0.6f },
         { P::noiseLevel, 0.35f },
-        { P::fltCutoff, 200.0f }, { P::fltReso, 0.3f }, { P::fltEnv, 0.65f },
-        { P::ampA, 2.5f }, { P::ampS, 1.0f }, { P::ampR, 0.25f },
+        { P::fltCutoff, 900.0f }, { P::fltReso, 0.3f },
+        { P::ampA, 3.8f }, { P::ampS, 1.0f }, { P::ampR, 0.25f },
         { P::fltA, 4.0f }, { P::fltD, 1.0f }, { P::fltS, 1.0f }, { P::fltR, 0.3f },
-        { P::pitchAmt, -24.0f }, { P::pitchDec, 4.0f },
-        { P::lfo1Rate, 1.0f },
-        { P::mod1Src, msFltEnv }, { P::mod1Dst, mdLfo1Rate }, { P::mod1Amt, 0.8f },
-        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdPan }, { P::mod2Amt, 0.5f },
+        { P::lfo1Wave, lSaw }, { P::lfo1Rate, 0.25f },
+        { P::lfo2Rate, 1.0f },
+        { P::mod1Src, msLfo1 }, { P::mod1Dst, mdPitch }, { P::mod1Amt, -0.7071f },
+        { P::mod2Src, msLfo1 }, { P::mod2Dst, mdCutoff }, { P::mod2Amt, -0.5f },
+        { P::mod3Src, msFltEnv }, { P::mod3Dst, mdLfo2Rate }, { P::mod3Amt, 0.8f },
+        { P::mod4Src, msLfo2 }, { P::mod4Dst, mdPan }, { P::mod4Amt, 0.5f },
         { P::voiceMode, vmMono }, { P::velSens, 0.0f },
         { P::choOn, on },
         { P::revOn, on }, { P::revSize, 0.7f }, { P::revMix, 0.3f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, -1.0f },
     });
 
     add (b, "Fall Off", "FX", "Downlifter: pitch and filter dive after the hit.",
@@ -855,13 +930,13 @@ Bank makeFactoryBank()
         { P::osc2On, on }, { P::osc2Wave, wSquare }, { P::osc2Fine, 12.0f }, { P::osc2Level, 0.5f },
         { P::noiseLevel, 0.15f },
         { P::fltCutoff, 6000.0f }, { P::fltEnv, -0.5f },
-        { P::ampD, 2.5f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
+        { P::ampD, 4.0f }, { P::ampS, 0.0f }, { P::ampR, 0.6f },
         { P::fltA, 2.2f }, { P::fltD, 0.5f }, { P::fltS, 1.0f }, { P::fltR, 0.6f },
         { P::pitchAmt, 36.0f }, { P::pitchDec, 2.2f },
         { P::voiceMode, vmMono }, { P::velSens, 0.0f },
         { P::dlyOn, on }, { P::dlyDiv, d1_4 }, { P::dlyMix, 0.25f },
         { P::revOn, on }, { P::revSize, 0.8f }, { P::revMix, 0.4f },
-        { P::masterGain, -3.0f },
+        { P::masterGain, -4.0f },
     });
 
     add (b, "White Wash", "FX", "Filtered noise swell for transitions.",
@@ -876,16 +951,19 @@ Bank makeFactoryBank()
         { P::velSens, 0.0f },
         { P::dlyOn, on }, { P::dlyMix, 0.2f },
         { P::revOn, on }, { P::revSize, 0.85f }, { P::revMix, 0.45f },
+        { P::masterGain, 1.0f },
     });
 
     add (b, "Zap", "FX", "Laser zap one-shot with a fast echo.",
     {
+        { P::osc1Level, 1.0f },
         { P::fltType, fLP12 }, { P::fltCutoff, 8000.0f },
         { P::ampD, 0.25f }, { P::ampS, 0.0f }, { P::ampR, 0.1f },
         { P::pitchAmt, 48.0f }, { P::pitchDec, 0.09f },
         { P::voiceMode, vmMono }, { P::velSens, 0.3f },
         { P::drvOn, on }, { P::drvType, dHard }, { P::drvAmt, 0.4f },
         { P::dlyOn, on }, { P::dlyDiv, d1_16 }, { P::dlyFb, 0.4f }, { P::dlyMix, 0.2f },
+        { P::masterGain, 9.0f },
     });
 
     return b;
