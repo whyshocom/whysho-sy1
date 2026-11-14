@@ -31,7 +31,12 @@ WhyshoSynthAudioProcessorEditor::WhyshoSynthAudioProcessorEditor (WhyshoSynthAud
     //      a brand-new instance starts with the theme the user picked last.
     auto& ui = proc.uiState();
     int themeIndex = ui.theme.load();
-    if (themeIndex < 0) themeIndex = juce::jmax (0, themeNames().indexOf (settings::get ("theme", "Paper")));
+    if (themeIndex < 0)
+    {
+        themeIndex = juce::jmax (0, themeNames().indexOf (settings::get ("theme", "Paper")));
+        int unset = -1;
+        ui.theme.compare_exchange_strong (unset, themeIndex);      // never over a state that arrives meanwhile
+    }
     applyTheme (themeIndex, false);
 
     // ---- wiring ----
@@ -76,9 +81,16 @@ WhyshoSynthAudioProcessorEditor::~WhyshoSynthAudioProcessorEditor()
 void WhyshoSynthAudioProcessorEditor::applyTheme (int index, bool userChoice)
 {
     setThemeIndex (index);
-    stateTheme = currentThemeIndex();
-    proc.uiState().theme.store (stateTheme);
-    if (userChoice) settings::set ("theme", theme().name);
+    stateTheme = index;             // what the instance state said when we looked (kept even if out of range)
+    if (userChoice)
+    {
+        // Only a choice made in this window is written back. Following the saved
+        // value must not store it again: a host thread may have loaded another
+        // state since we read it.
+        stateTheme = currentThemeIndex();
+        proc.uiState().theme.store (stateTheme);
+        settings::set ("theme", theme().name);
+    }
     restyle();
 }
 

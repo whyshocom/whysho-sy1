@@ -144,11 +144,12 @@ Audio renderEngine (Patch patch, const Phrase& ph, double sr = 48000.0, int bloc
 
 struct FixedTempoHead : juce::AudioPlayHead
 {
-    double bpm = 120.0;
+    double bpm = 120.0, ppq = 0.0;      // renders play from bar 1 so synced LFOs sit on the grid
     juce::Optional<PositionInfo> getPosition() const override
     {
         PositionInfo i;
         i.setBpm (bpm);
+        i.setPpqPosition (ppq);
         i.setIsPlaying (true);
         return i;
     }
@@ -161,8 +162,9 @@ Audio renderProcessor (WhyshoSynthAudioProcessor& proc, const Phrase& ph, double
     proc.setPlayHead (&head);
     proc.setPlayConfigDetails (0, 2, sr, block);
     proc.prepareToPlay (sr, block);
-    auto a = renderLoop (ph, sr, block, [&] (juce::AudioBuffer<float>& b, juce::MidiBuffer& m, int)
+    auto a = renderLoop (ph, sr, block, [&] (juce::AudioBuffer<float>& b, juce::MidiBuffer& m, int pos)
     {
+        head.ppq = (double) pos / sr * bpm / 60.0;
         proc.processBlock (b, m);
         return proc.activeVoices();
     });
@@ -820,6 +822,61 @@ void testModulation (TestRun& t)
         // second note starts at 0.3 s: retriggered LFO is high again, the free-running one is in its low half (0.25..0.5 s)
         t.check (peakOf (retrig, 0.32, 0.45) > 0.1 && peakOf (freeRun, 0.32, 0.45) < 0.002 && peakOf (freeRun, 0.52, 0.58) > 0.1,
                  "LFO retrigger on = per-note phase, off = shared free-running phase");
+    }
+    {
+        // Hard-edged LFO into Level: the gate must not click. Metric = energy above
+        // 2 kHz relative to the total for a gated 131 Hz sine (a 16-sample edge sits near -45 dB).
+        auto gate = [] (int wave, double& depthDb)
+        {
+            Patch q = cleanPatch (wSine);
+            q.set (P::mod1Src, msLfo1).set (P::mod1Dst, mdLevel).set (P::mod1Amt, 1.0f);
+            q.set (P::lfo1Wave, (float) wave).set (P::lfo1Sync, 1).set (P::lfo1Div, 4);      // 1/16
+            const auto a = renderEngine (q, oneNote (48, 2.0, 0.1), 48000.0, 512, 140.0);
+            const double step = 60.0 / 140.0 / 4.0;      // one gate cycle
+            depthDb = toDb (peakOf (a, 4.0 * step + 0.012, 4.5 * step - 0.004) / juce::jmax (1.0e-9, peakOf (a, 4.5 * step + 0.012, 5.0 * step - 0.004)));
+            const auto mag = spectrum (a.mono(), 9600, 16);
+            double hf = 0.0, all = 0.0;
+            for (size_t k = 1; k < mag.size(); ++k) { const double pw = (double) mag[k] * mag[k]; all += pw; if ((double) k * 48000.0 / 65536.0 > 2000.0) hf += pw; }
+            return 10.0 * std::log10 ((hf + 1.0e-30) / (all + 1.0e-30));
+        };
+        double depthSq = 0.0, depthSh = 0.0, unused = 0.0;
+        const double sq = gate (lSquare, depthSq), sh = gate (lSampleHold, depthSh), sw = gate (lSaw, unused);
+        t.check (sq < -75.0 && sh < -75.0 && sw < -75.0, "square / S&H / saw LFO -> Level gates without edge clicks",
+                 "energy above 2 kHz: " + num (sq, 1) + " / " + num (sh, 1) + " / " + num (sw, 1) + " dB");
+        t.check (depthSq > 40.0, "gate depth is unaffected by the slew", num (depthSq, 1) + " dB on/off for a 1/16 square gate at 140 bpm");
+    }
+    {
+        // Transport lock: synced, non-retriggered LFO follows the song position.
+        Patch q = cleanPatch (wSine);
+        q.set (P::ampA, 0.001f).set (P::mod1Src, msLfo1).set (P::mod1Dst, mdLevel).set (P::mod1Amt, 1.0f);
+        q.set (P::lfo1Wave, lSquare).set (P::lfo1Sync, 1).set (P::lfo1Div, 2).set (P::lfo1Retrig, 0);      // 1/4 = 0.5 s at 120 bpm
+        const Phrase ph = oneNote (69, 1.2, 0.1);
+        auto run = [&] (double preRollSeconds, double startPpq, bool playing)
+        {
+            dsp::SynthEngine eng;
+            eng.prepare (48000.0, 512);
+            juce::AudioBuffer<float> buf (2, 300);
+            juce::MidiBuffer none;
+            for (int i = 0; i < (int) (preRollSeconds * 48000.0 / 300.0); ++i)      // idle with the transport stopped
+            {
+                eng.setTransport (0.0, false);
+                eng.process (buf, none, q.v.data(), 120.0);
+            }
+            return renderEngine (eng, q, ph, 48000.0, 512, 120.0, [&] (Patch&, int pos)
+            {
+                eng.setTransport (startPpq + (double) pos / 48000.0 * 2.0, playing);
+            }, false);
+        };
+        const auto a = run (0.0, 0.5, true), b = run (0.37, 0.5, true), stopped = run (0.0, 0.5, false);
+        double diff = 0.0;
+        for (int i = 0; i < a.size(); ++i) diff = juce::jmax (diff, (double) std::abs (a.l[(size_t) i] - b.l[(size_t) i]));
+        const double hi = peakOf (a, 0.3, 0.45);
+        int edge = -1;
+        for (int i = 0; i < a.size() && edge < 0; ++i) if (std::abs (a.l[(size_t) i]) > 0.05 * hi) edge = i;
+        t.check (diff < 1.0e-6 && hi > 0.1, "transport lock: same song position = identical render, whatever happened before", "max diff " + juce::String (diff, 9));
+        t.check (std::abs (edge / 48000.0 - 0.25) < 0.004 && peakOf (a, 0.8, 0.95) < 0.01 * hi, "transport lock: gate edges land on the beat",
+                 "started at ppq 0.5, first edge at " + num (edge / 48.0, 2) + " ms (beat = 250 ms)");
+        t.check (peakOf (stopped, 0.05, 0.2) > 0.5 * hi && maxSecondDiff (a, 0.2, 0.3) < 0.01, "transport stopped: LFO free-runs; locked edge is click-free");
     }
     {
         Patch q = cleanPatch (wSine);

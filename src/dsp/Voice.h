@@ -51,6 +51,8 @@ struct Shared
 {
     float sr = 48000.0f, invSr = 1.0f / 48000.0f;
     float ctrlDt = (float) kCtrl / 48000.0f;       // seconds per control tick
+    float slewCoef = 1.0f;                         // per tick: each of the two Pan-modulation slew stages
+    float levelCoef = 1.0f;                        // per sample: each of the four Level-modulation slew stages
 
     // oscillators
     bool  oscOn[kNumOscs] {};
@@ -73,7 +75,8 @@ struct Shared
     int   lfoWave[kNumLfos] {};
     float lfoRate[kNumLfos] {};                    // Hz (tempo sync already resolved)
     bool  lfoRetrig[kNumLfos] {};
-    float lfoGlobalPhase[kNumLfos] {};             // free-running phase new notes latch on to
+    float lfoGlobalPhase[kNumLfos] {};             // shared phase of non-retriggered LFOs, at the start of the
+                                                   // segment being rendered (transport-locked when synced + playing)
     uint32_t lfoGlobalCycle[kNumLfos] {};
 
     // mod matrix
@@ -128,7 +131,9 @@ private:
     uint32_t seed = 1;
     Rng   rng;
     bool  firstTick = true;
-    int   ctrlCountdown = 0;
+    int   ctrlCountdown = 0, segOffset = 0;        // segOffset: samples into the engine's current segment
+    float panSlew[2] {};
+    float levelLp[4] {}, levelTarget = 1.0f;       // per-sample 4-pole (near-Gaussian) slew of the Level mod gain
     float fadeGain = 1.0f, fadeStep = 0.0f;
 
     // modulators

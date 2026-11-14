@@ -21,6 +21,13 @@ public:
     void process (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi,
                   const float* values, double bpm);
 
+    // Host transport, called once per block BEFORE process() (audio thread).
+    // While playing, tempo-synced LFOs with retrigger off are phase-locked to
+    // the song position (phase = frac (ppq / division length)), so a synced
+    // gate sits on the grid and is identical on every playback. When stopped —
+    // or if this is never called — those LFOs free-run on from their last phase.
+    void setTransport (double ppqPosition, bool isPlaying) noexcept;
+
     int activeVoices() const noexcept;
 
 private:

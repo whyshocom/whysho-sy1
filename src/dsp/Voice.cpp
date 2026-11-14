@@ -211,7 +211,17 @@ void Voice::control (const Shared& s) noexcept
     // ---- LFOs (rate modulation uses last tick's matrix output)
     for (int l = 0; l < kNumLfos; ++l)
     {
-        if (! snap)
+        if (lfoFree[l] && ! nonZero (lfoRateMod[l]))
+        {
+            // Non-retriggered: slaved to the engine's shared phase (sample-exact
+            // via the offset into the segment), so every voice — including ones
+            // already sounding — follows a transport locate.
+            float ph = s.lfoGlobalPhase[l] + s.lfoRate[l] * s.invSr * (float) segOffset;
+            uint32_t cycle = s.lfoGlobalCycle[l];
+            while (ph >= 1.0f) { ph -= 1.0f; ++cycle; }
+            lfoPhase[l] = ph; lfoCycle[l] = cycle;
+        }
+        else if (! snap)
         {
             float rate = s.lfoRate[l];
             if (nonZero (lfoRateMod[l])) rate *= std::exp2 (3.0f * lfoRateMod[l]);     // ±1 → ×/÷ 8
@@ -268,6 +278,15 @@ void Voice::control (const Shared& s) noexcept
         if (dst >= mdPitch && dst <= mdOsc3Pitch) amt *= std::abs (amt);     // fine control near zero (vibrato)
         md[dst] += amt * v;
     }
+    // Pan: two-stage ~1.2 ms slew so hard LFO edges (or a transport jump) do
+    // not snap the image. Level gets a per-sample slew in the amp stage.
+    if (snap) panSlew[0] = panSlew[1] = md[mdPan];
+    else
+    {
+        panSlew[0] += s.slewCoef * (md[mdPan] - panSlew[0]);
+        panSlew[1] += s.slewCoef * (panSlew[0] - panSlew[1]);
+    }
+    md[mdPan] = panSlew[1];
     lfoRateMod[0] = clampf (md[mdLfo1Rate], -1.0f, 1.0f);
     lfoRateMod[1] = clampf (md[mdLfo2Rate], -1.0f, 1.0f);
 
@@ -385,7 +404,9 @@ void Voice::control (const Shared& s) noexcept
 
     // ---- amp
     const float velGain = 1.0f - s.velSens * (1.0f - velocity * velocity);
-    ampGain.set (kVoiceGain * velGain * clampf (1.0f + md[mdLevel], 0.0f, 2.0f), snap);
+    ampGain.set (kVoiceGain * velGain, snap);
+    levelTarget = clampf (1.0f + md[mdLevel], 0.0f, 2.0f);
+    if (snap) for (auto& z : levelLp) z = levelTarget;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,11 +586,17 @@ void Voice::renderChunk (float* outL, float* outR, int n, const Shared& s) noexc
     }
 
     // ---- amp
+    // Level modulation runs through four cascaded one-poles (≈ 2 ms edge, close
+    // to a Gaussian step): a square / S&H gate stays tight, but its splatter
+    // falls off fast enough that the edge is not heard as a click.
     float a = ampGain.cur;
+    const float lc = s.levelCoef, lt = levelTarget;
+    float z0 = levelLp[0], z1 = levelLp[1], z2 = levelLp[2], z3 = levelLp[3];
     for (int i = 0; i < n; ++i)
     {
         a += ampGain.step;
-        float e = ampEnv.next (s.ampEnv) * a;
+        z0 += lc * (lt - z0); z1 += lc * (z0 - z1); z2 += lc * (z1 - z2); z3 += lc * (z2 - z3);
+        float e = ampEnv.next (s.ampEnv) * a * z3;
         if (fading)
         {
             fadeGain -= fadeStep;
@@ -580,6 +607,7 @@ void Voice::renderChunk (float* outL, float* outR, int n, const Shared& s) noexc
         outR[i] += mixR[i] * e;
     }
     ampGain.cur = a;
+    levelLp[0] = z0; levelLp[1] = z1; levelLp[2] = z2; levelLp[3] = z3;
 
     // Free the voice once silent — including a held note that decayed to a zero sustain.
     if (ampEnv.stage == Env::idle
@@ -589,6 +617,7 @@ void Voice::renderChunk (float* outL, float* outR, int n, const Shared& s) noexc
 
 void Voice::render (float* outL, float* outR, int n, const Shared& s) noexcept
 {
+    segOffset = 0;
     while (n > 0 && active)
     {
         if (ctrlCountdown <= 0)
@@ -599,7 +628,7 @@ void Voice::render (float* outL, float* outR, int n, const Shared& s) noexcept
         }
         const int m = std::min (n, ctrlCountdown);
         renderChunk (outL, outR, m, s);
-        outL += m; outR += m; n -= m; ctrlCountdown -= m;
+        outL += m; outR += m; n -= m; ctrlCountdown -= m; segOffset += m;
     }
 }
 } // namespace wsho::dsp

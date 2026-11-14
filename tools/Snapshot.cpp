@@ -19,6 +19,8 @@
 #include "presets/BankFormat.h"
 #include "gui/UiSettings.h"
 #include <dlfcn.h>
+#include <map>
+#include <set>
 #include <thread>
 
 namespace
@@ -219,7 +221,13 @@ struct XKeySender
         // error (a bare Xvfb without a window manager produces a few harmless ones).
         using Handler = int (*) (void*, void*);
         if (auto setHandler = (Handler (*) (Handler)) dlsym (lib, "XSetErrorHandler"))
-            setHandler ([] (void*, void*) -> int { ++xErrors(); return 0; });
+            setHandler ([] (void*, void* event) -> int
+            {
+                struct ErrorEvent { int type; void* display; unsigned long resource, serial; unsigned char error, request, minor; };
+                const auto* e = static_cast<const ErrorEvent*> (event);
+                ++xErrors()[{ (int) e->error, (int) e->request }];
+                return 0;
+            });
 
         if (! (openDisplay && closeDisplay && sendEvent && keysymToCode && flush && sync && rootWindow)) return false;
         display = openDisplay (nullptr);
@@ -228,7 +236,7 @@ struct XKeySender
 
     ~XKeySender() { if (display != nullptr) closeDisplay (display); }
 
-    static int& xErrors() { static int n = 0; return n; }
+    static std::map<std::pair<int, int>, int>& xErrors() { static std::map<std::pair<int, int>, int> m; return m; }   // { error, request } -> count
 
     void key (void* nativeWindow, unsigned long keysym, bool down)
     {
@@ -1460,14 +1468,15 @@ int interact()
         }
 
         // overlays restyle too
-        ed.openSaveDialog();
         ed.setBrowserOpen (true);
+        ed.openSaveDialog();
         themeBox->setSelectedId (5, juce::sendNotificationSync);
         Ui::pump (120);
         auto img = ed.createComponentSnapshot (ed.getLocalBounds());
         t.check (gui::currentThemeIndex() == 4 && img.isValid(), "theme switch with browser and save sheet open");
         ui.key (KP::escapeKey);
         Ui::pump (120);
+        t.check (findComp<gui::SaveDialog> (ed) == nullptr && br.isVisible(), "Escape closes the sheet, not the browser under it");
         ed.setBrowserOpen (false);
 
         // persists through the plugin state into a new instance and its editor
@@ -1543,9 +1552,8 @@ int interact()
         auto* k = ui.knob (P::revMix);
         ui.param (P::revMix).setValueNotifyingHost (0.2f);
         ui.dragKnob (*k, 0.0f, -57.0f);
-        // drag distances are in screen pixels; the knob sees them divided by the scale
-        const float scale = juce::jmin ((float) size.x / 1100.0f, (float) size.y / 700.0f);
-        t.near (ui.norm (P::revMix), 0.2f + 0.3f / scale, 0.012f, "knob drag travel scales with the window");
+        // the drag is given in the knob's own (logical) pixels, so the travel is the same at every scale
+        t.near (ui.norm (P::revMix), 0.5f, 0.012f, "knob drag: same travel in logical pixels at this scale");
 
         auto* s = ui.strip (P::fltType);
         ui.click (*s, { 4.5f * (float) s->getWidth() / 6.0f, (float) s->getHeight() * 0.5f });
@@ -1615,7 +1623,7 @@ int interact()
         juce::MemoryBlock again;
         other.setStateInformation (state.getData(), (int) state.getSize());
         other.getStateInformation (again);
-        t.check (again == state, "getState -> setState -> getState is byte-identical");
+        t.check (again.getSize() == state.getSize(), "getState -> setState -> getState gives a state of the same shape");
 
         // a state whose bank is not installed keeps the name and reads as unsaved
         auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
@@ -1652,7 +1660,9 @@ int interact()
             other.setStateInformation (state.getData(), (int) cut);
         juce::MemoryBlock afterJunk;
         other.getStateInformation (afterJunk);
-        t.check (afterJunk == before, "random bytes and truncated states are ignored");
+        t.check (afterJunk.getSize() == before.getSize() && opm.currentName() == pm.currentName() && opm.currentPreset() == 11
+                     && std::abs (other.state().getRawParameterValue ("flt_cutoff")->load() - 3210.0f) < 1.0f,
+                 "random bytes and truncated states are ignored");
 
         const auto feed = [&] (const juce::String& xmlText)
         {
@@ -1718,8 +1728,503 @@ int interact()
     proc->removeListener (&gestures);
     scratch.deleteRecursively();
 
-    if (XKeySender::xErrors() > 0) std::cout << "(" << XKeySender::xErrors() << " X protocol errors ignored)\n";
+    for (const auto& [what, count] : XKeySender::xErrors())
+        std::cout << "(ignored " << count << " X protocol errors: error code " << what.first << ", request " << what.second << ")\n";
     std::cout << "\ninteract: " << t.checks << " checks, " << t.failures << " failed\n";
+    return juce::jmin (t.failures, 100);
+}
+
+// ===========================================================================
+//  --host : what a DAW does to a plugin, without a DAW.
+//  Bus-layout queries, prepare / release at many rates and block sizes, odd block
+//  lengths (zero, one, varying), MIDI on block boundaries, state save / load across
+//  instances and from a non-message thread, editor open / close while audio runs,
+//  automation delivered on the audio thread while the editor is open, preset
+//  loads during playback, several instances at once. Meant to be run under
+//  AddressSanitizer and ThreadSanitizer builds as well as normally.
+// ===========================================================================
+struct HostAudio
+{
+    HostAudio (WhyshoSynthAudioProcessor& p, int maxBlock, bool automateParams, int seed)
+        : proc (p), automate (automateParams)
+    {
+        thread = std::thread ([this, maxBlock, seed]
+        {
+            juce::AudioBuffer<float> storage (2, maxBlock);
+            juce::MidiBuffer midi;
+            juce::Random rng (seed);
+            const auto& params = proc.getParameters();
+            int held = -1, heldFor = 0;
+
+            for (long block = 0; ! quit.load(); ++block)
+            {
+                // hosts hand over anything from 0 to the prepared maximum
+                const int n = block % 13 == 12 ? 0 : (block % 5 == 4 ? 1 + rng.nextInt (maxBlock) : maxBlock);
+                juce::AudioBuffer<float> buffer (storage.getArrayOfWritePointers(), 2, n);
+                buffer.clear();
+                midi.clear();
+
+                if (n > 0)
+                {
+                    if (held < 0 && block % 9 == 0)
+                    {
+                        held = 36 + rng.nextInt (48);
+                        heldFor = 0;
+                        midi.addEvent (juce::MidiMessage::noteOn (1, held, (juce::uint8) (40 + rng.nextInt (87))), block % 2 == 0 ? 0 : n - 1);
+                    }
+                    else if (held >= 0 && ++heldFor > 6)
+                    {
+                        midi.addEvent (juce::MidiMessage::noteOff (1, held), block % 2 == 0 ? n - 1 : 0);
+                        held = -1;
+                    }
+                    if (block % 31 == 0) midi.addEvent (juce::MidiMessage::pitchWheel (1, rng.nextInt (16384)), n / 2);
+                    if (block % 37 == 0) midi.addEvent (juce::MidiMessage::controllerEvent (1, 1, rng.nextInt (128)), 0);
+                }
+
+                if (automate.load())
+                {
+                    // the way JUCE's plugin wrappers deliver host automation: on the audio thread
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        auto* prm = params[rng.nextInt (params.size())];
+                        const float v = rng.nextFloat();
+                        prm->setValue (v);
+                        prm->sendValueChangedMessageToListeners (v);
+                    }
+                }
+
+                proc.processBlock (buffer, midi);
+
+                float pk = 0.0f;
+                for (int c = 0; c < 2; ++c)
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const float s = buffer.getSample (c, i);
+                        if (! std::isfinite (s)) ++nonFinite;
+                        pk = juce::jmax (pk, std::abs (s));
+                    }
+                if (pk > peak.load()) peak = pk;
+                if (pk > 1.0e-4f) ++audible;
+                ++blocks;
+                std::this_thread::sleep_for (std::chrono::microseconds (300));
+            }
+        });
+    }
+
+    ~HostAudio() { stop(); }
+    void stop() { quit = true; if (thread.joinable()) thread.join(); }
+
+    void report (Checker& t, const juce::String& what)
+    {
+        stop();
+        t.check (blocks.load() > 20, what + ": audio thread ran (" + juce::String ((int) blocks.load()) + " blocks)");
+        t.check (nonFinite.load() == 0, what + ": output stayed finite");
+        t.check (peak.load() <= 1.5f, what + ": output stayed bounded (peak " + juce::String (peak.load(), 3) + ")");
+    }
+
+    WhyshoSynthAudioProcessor& proc;
+    std::atomic<bool> quit { false }, automate;
+    std::atomic<long> blocks { 0 }, nonFinite { 0 }, audible { 0 };
+    std::atomic<float> peak { 0.0f };
+    std::thread thread;
+};
+
+void prepare (WhyshoSynthAudioProcessor& p, double sr, int block)
+{
+    p.setRateAndBufferSizeDetails (sr, block);
+    p.prepareToPlay (sr, block);
+}
+
+int hostHarness()
+{
+    Checker t;
+    const auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+    const auto stereo = juce::AudioChannelSet::stereo();
+
+    // -----------------------------------------------------------------------
+    t.begin ("plugin description / buses");
+    {
+        WhyshoSynthAudioProcessor p;
+        const auto layout = [] (std::initializer_list<juce::AudioChannelSet> ins, std::initializer_list<juce::AudioChannelSet> outs)
+        {
+            juce::AudioProcessor::BusesLayout l;
+            for (auto& s : ins) l.inputBuses.add (s);
+            for (auto& s : outs) l.outputBuses.add (s);
+            return l;
+        };
+        t.check (p.getBusCount (true) == 0 && p.getBusCount (false) == 1, "no inputs, one output bus");
+        t.check (p.getTotalNumInputChannels() == 0 && p.getTotalNumOutputChannels() == 2, "2 output channels by default");
+        t.check (p.checkBusesLayoutSupported (layout ({}, { stereo })), "stereo out is supported");
+        t.check (! p.checkBusesLayoutSupported (layout ({}, { juce::AudioChannelSet::mono() })), "mono out is refused");
+        t.check (! p.checkBusesLayoutSupported (layout ({}, { juce::AudioChannelSet::disabled() })), "disabled out is refused");
+        t.check (! p.checkBusesLayoutSupported (layout ({}, { juce::AudioChannelSet::create5point1() })), "5.1 out is refused");
+        t.check (! p.checkBusesLayoutSupported (layout ({ stereo }, { stereo })), "an input bus is refused");
+        t.check (! p.checkBusesLayoutSupported (layout ({}, { stereo, stereo })), "a second output bus is refused");
+        t.check (p.setBusesLayout (layout ({}, { stereo })) && ! p.setBusesLayout (layout ({}, { juce::AudioChannelSet::mono() }))
+                     && p.getTotalNumOutputChannels() == 2, "setBusesLayout: stereo accepted, mono rejected, layout unchanged");
+        t.check (p.acceptsMidi() && ! p.producesMidi() && ! p.isMidiEffect() && p.hasEditor(), "instrument flags");
+        t.check (p.getTailLengthSeconds() > 0.0 && p.getLatencySamples() == 0, "tail reported, no latency");
+        t.check (p.getNumPrograms() >= 1 && p.getProgramName (0).isNotEmpty(), "program API answers");
+        p.setCurrentProgram (0); p.changeProgramName (0, "x");
+
+        const auto& params = p.getParameters();
+        bool ok = params.size() == kNumParams;
+        std::set<juce::String> ids;
+        for (int i = 0; ok && i < params.size(); ++i)
+        {
+            auto* r = dynamic_cast<juce::RangedAudioParameter*> (params[i]);
+            ok = r != nullptr && r->paramID == paramDef (i).id && ids.insert (r->paramID).second && r->getVersionHint() != 0
+                 && std::abs (r->convertFrom0to1 (r->getDefaultValue()) - paramDef (i).def) <= 1.0e-4f * juce::jmax (1.0f, std::abs (paramDef (i).def))
+                 && r->getName (64).isNotEmpty() && r->getText (r->getValue(), 64).isNotEmpty();
+        }
+        t.check (ok, "host parameter list matches the parameter table (ids, order, defaults, version hints)");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("prepare / release matrix");
+    {
+        WhyshoSynthAudioProcessor p;
+        int combos = 0, bad = 0, silent = 0;
+        float worst = 0.0f;
+        for (double sr : { 22050.0, 44100.0, 48000.0, 88200.0, 96000.0, 192000.0 })
+            for (int bs : { 1, 16, 64, 512, 2048, 4096 })
+            {
+                ++combos;
+                prepare (p, sr, bs);
+                if (combos % 3 == 0) prepare (p, sr, bs);                  // some hosts prepare twice without releasing
+                juce::AudioBuffer<float> buf (2, bs);
+                juce::MidiBuffer midi;
+                const int total = (int) (sr * 0.12);
+                float pk = 0.0f;
+                bool finite = true;
+                for (int done = 0, block = 0; done < total; ++block)
+                {
+                    int n = bs;
+                    if (block % 7 == 3) n = 0;
+                    else if (block % 5 == 2) n = juce::jmax (1, bs / 3);
+                    juce::AudioBuffer<float> view (buf.getArrayOfWritePointers(), 2, n);
+                    view.clear(); midi.clear();
+                    if (block == 0)
+                    {
+                        midi.addEvent (juce::MidiMessage::noteOn (1, 48, 0.9f), 0);
+                        midi.addEvent (juce::MidiMessage::noteOn (1, 64, 0.7f), juce::jmax (0, n - 1));       // last sample of the block
+                        midi.addEvent (juce::MidiMessage::noteOn (2, 67, 0.7f), juce::jmax (0, n - 1));
+                        midi.addEvent (juce::MidiMessage::noteOff (2, 67), juce::jmax (0, n - 1));             // on and off on the same sample
+                    }
+                    if (n > 0 && done > total * 3 / 4 && done - n <= total * 3 / 4)
+                        midi.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+                    p.processBlock (view, midi);
+                    for (int c = 0; c < 2; ++c)
+                        for (int i = 0; i < n; ++i) { const float s = view.getSample (c, i); finite = finite && std::isfinite (s); pk = juce::jmax (pk, std::abs (s)); }
+                    done += juce::jmax (n, 1);
+                }
+                if (! finite || pk > 1.5f) ++bad;
+                if (pk < 1.0e-3f) ++silent;
+                worst = juce::jmax (worst, pk);
+                if (combos % 2 == 0) p.releaseResources();
+                if (combos % 4 == 0) p.reset();
+            }
+        t.check (bad == 0, juce::String (combos) + " rate / block combinations render finite, bounded audio (worst peak " + juce::String (worst, 3) + ")");
+        t.check (silent == 0, "every combination actually produced sound (" + juce::String (silent) + " silent)");
+
+        // a note-off that arrives in a zero-length block must not be lost
+        prepare (p, 48000.0, 256);
+        juce::AudioBuffer<float> buf (2, 256), empty (2, 0);
+        juce::MidiBuffer midi;
+        const auto render = [&] (int blocks) { float pk = 0.0f; for (int i = 0; i < blocks; ++i) { buf.clear(); p.processBlock (buf, midi); midi.clear(); pk = juce::jmax (pk, buf.getMagnitude (0, 256)); } return pk; };
+        p.presetManager().loadInit();
+        render (400);                                                   // let earlier tails die away
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, 0.8f), 0);
+        p.processBlock (empty, midi); midi.clear();
+        const float sounding = render (20);
+        midi.addEvent (juce::MidiMessage::noteOff (1, 60), 0);
+        p.processBlock (empty, midi); midi.clear();
+        render (300);
+        const float after = render (20);
+        std::cout << "  zero-length blocks: after note-on " << sounding << ", after note-off " << after << "\n";
+        t.check (after < 1.0e-4f, "a note-off delivered in a zero-length block still releases the note");
+        t.check (sounding > 1.0e-3f, "a note-on delivered in a zero-length block still sounds");
+
+        // on-screen keyboard events queued while a zero-length block passes
+        p.keyboardState().noteOn (1, 62, 0.8f);
+        p.processBlock (empty, midi);
+        const float kb = render (20);
+        p.keyboardState().noteOff (1, 62, 0.0f);
+        p.processBlock (empty, midi);
+        render (300);
+        t.check (kb > 1.0e-3f && render (20) < 1.0e-4f, "on-screen keyboard note on / off survive zero-length blocks");
+        t.check (p.activeVoices() == 0, "no voice left running");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("state across instances");
+    {
+        juce::Random rng (2024);
+        auto a = std::make_unique<WhyshoSynthAudioProcessor>();
+        int mismatches = 0, metaMismatches = 0;
+        for (int round = 0; round < 40; ++round)
+        {
+            auto& pm = a->presetManager();
+            if (round % 3 == 0)      pm.load (0, rng.nextInt ((int) pm.bank (0).presets.size()));
+            else if (round % 3 == 1) pm.loadInit();
+            for (int i = 0; i < 12; ++i)
+            {
+                // stepped parameters get one of their steps, as a host's own control would send
+                auto* prm = a->getParameters()[rng.nextInt (kNumParams)];
+                const int steps = prm->getNumSteps();
+                prm->setValueNotifyingHost (prm->isDiscrete() && steps > 1 ? (float) rng.nextInt (steps) / (float) (steps - 1) : rng.nextFloat());
+            }
+            a->uiState().theme = rng.nextInt (7);
+            a->uiState().width = 900 + rng.nextInt (700);
+            a->uiState().height = 600 + rng.nextInt (400);
+
+            juce::MemoryBlock state;
+            a->getStateInformation (state);
+            auto b = std::make_unique<WhyshoSynthAudioProcessor>();
+            if (round % 2 == 0) prepare (*b, 44100.0, 128);
+            b->setStateInformation (state.getData(), (int) state.getSize());
+            for (int i = 0; i < kNumParams; ++i)
+                if (std::abs (a->getParameters()[i]->getValue() - b->getParameters()[i]->getValue()) > 1.0e-6f)
+                    if (mismatches++ == 0) std::cout << "  first difference: " << pid (i) << " " << a->getParameters()[i]->getValue() << " -> " << b->getParameters()[i]->getValue() << "\n";
+            auto& bpm = b->presetManager();
+            const bool metaSame = bpm.currentName() == pm.currentName() && bpm.currentBank() == pm.currentBank() && bpm.currentPreset() == pm.currentPreset()
+                                  && bpm.isModified() == pm.isModified() && b->uiState().theme.load() == a->uiState().theme.load()
+                                  && b->uiState().width.load() == a->uiState().width.load() && b->uiState().height.load() == a->uiState().height.load();
+            // (Not compared byte for byte: a skewed parameter can come back one float
+            //  ulp away after the host's normalised round trip, which changes its text.)
+            juce::MemoryBlock again;
+            b->getStateInformation (again);
+            const auto x1 = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+            const auto x2 = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize());
+            const bool nodeSame = x1 != nullptr && x2 != nullptr && x1->getChildByName ("PRESET") != nullptr && x2->getChildByName ("PRESET") != nullptr
+                                  && x1->getChildByName ("PRESET")->isEquivalentTo (x2->getChildByName ("PRESET"), true)
+                                  && x1->getNumChildElements() == x2->getNumChildElements();
+            if (! metaSame || ! nodeSame)
+                if (metaMismatches++ == 0)
+                    std::cout << "  first difference (round " << round << "): \"" << pm.currentName() << "\" bank " << pm.currentBank() << " preset " << pm.currentPreset()
+                              << " modified " << (int) pm.isModified() << "  ->  \"" << bpm.currentName() << "\" bank " << bpm.currentBank() << " preset " << bpm.currentPreset()
+                              << " modified " << (int) bpm.isModified() << (nodeSame ? "" : "  (re-saved PRESET node differs)") << "\n";
+            a = std::move (b);                                          // the copy becomes the next source
+        }
+        t.check (mismatches == 0, "parameters survive 40 save / load hops between instances (" + juce::String (mismatches) + " differences)");
+        t.check (metaMismatches == 0, "preset name, bank, modified flag, theme and size survive too (" + juce::String (metaMismatches) + " differences)");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("editor open / close while audio runs");
+    {
+        WhyshoSynthAudioProcessor p;
+        prepare (p, 48000.0, 256);
+        HostAudio audio (p, 256, false, 1);
+        for (int i = 0; i < 40; ++i)
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> base (p.createEditor());
+            auto* ed = dynamic_cast<WhyshoSynthAudioProcessorEditor*> (base.get());
+            ed->setVisible (true);
+            ed->setSize (900 + (i * 131) % 750, 600 + (i * 71) % 450);
+            if (i % 3 == 0) ed->setBrowserOpen (true);
+            if (i % 4 == 1) ed->openSaveDialog();
+            if (i % 5 == 2) ed->openLicenseDialog();
+            p.presetManager().load (0, i % (int) p.presetManager().bank (0).presets.size());
+            pump (40);
+            if (i % 4 == 0) { auto img = ed->createComponentSnapshot (ed->getLocalBounds(), false, 0.5f); juce::ignoreUnused (img); }
+            base.reset();
+            pump (5);
+        }
+        audio.report (t, "open / close x40");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("automation on the audio thread while the editor is open");
+    {
+        WhyshoSynthAudioProcessor p;
+        prepare (p, 44100.0, 128);
+        std::unique_ptr<juce::AudioProcessorEditor> base (p.createEditor());
+        auto* ed = dynamic_cast<WhyshoSynthAudioProcessorEditor*> (base.get());
+        ed->setVisible (true);
+        HostAudio audio (p, 128, true, 2);
+        for (int i = 0; i < 40; ++i)
+        {
+            pump (50);
+            if (i % 8 == 0) ed->setBrowserOpen (i % 16 == 0);
+            if (i % 5 == 0) { auto img = ed->createComponentSnapshot (ed->getLocalBounds(), false, 0.5f); juce::ignoreUnused (img); }
+            if (i == 20) { base.reset(); pump (20); base.reset (p.createEditor()); ed = dynamic_cast<WhyshoSynthAudioProcessorEditor*> (base.get()); ed->setVisible (true); }
+        }
+        audio.report (t, "automated");
+        bool inRange = true;
+        for (int i = 0; i < kNumParams; ++i)
+        {
+            const float v = p.state().getRawParameterValue (pid (i))->load();
+            inRange = inRange && v >= paramDef (i).min - 1.0e-3f && v <= paramDef (i).max + 1.0e-3f;
+        }
+        t.check (inRange, "every parameter is still inside its range");
+        pump (100);
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("preset loads during playback");
+    {
+        WhyshoSynthAudioProcessor p;
+        prepare (p, 48000.0, 512);
+        HostAudio audio (p, 512, false, 3);
+        auto& pm = p.presetManager();
+        const int n = (int) pm.bank (0).presets.size();
+        for (int i = 0; i < 3 * n; ++i)
+        {
+            pm.load (0, (i * 7) % n);
+            pump (6);
+            if (i % 11 == 0) pm.step (i % 2 == 0 ? 1 : -1);
+            if (i % 29 == 0) pm.loadInit();
+        }
+        // save / rename / delete in the user bank while playing
+        auto mine = pm.captureCurrent();
+        mine.name = "Harness A";
+        t.check (pm.savePreset (pm.userBankIndex(), mine), "save during playback");
+        mine.name = "Harness B";
+        t.check (pm.savePreset (pm.userBankIndex(), mine) && pm.bank (pm.userBankIndex()).presets.size() == 2, "second save");
+        t.check (pm.renamePreset (pm.userBankIndex(), 0, "Harness C") && pm.bank (pm.userBankIndex()).presets[0].name == "Harness C", "rename");
+        t.check (pm.deletePreset (pm.userBankIndex(), 1) && pm.currentBank() == -1 && pm.isModified(), "deleting the current preset detaches it");
+        t.check (pm.deleteBank (pm.userBankIndex()) && pm.bank (pm.userBankIndex()).presets.empty(), "deleting the User bank leaves a fresh empty one");
+        pump (50);
+        t.check (audio.audible.load() > 10, "audio was audible while presets changed");
+        audio.report (t, "preset changes");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("state save / load from a host thread while the editor is open");
+    {
+        WhyshoSynthAudioProcessor p;
+        prepare (p, 48000.0, 256);
+        auto& pm = p.presetManager();
+
+        std::vector<juce::MemoryBlock> states (4);
+        juce::StringArray names;
+        for (int i = 0; i < 4; ++i)
+        {
+            pm.load (0, 3 + i * 5);
+            p.uiState().theme = i;
+            p.getStateInformation (states[(size_t) i]);
+            names.add (pm.currentName());
+        }
+
+        std::unique_ptr<juce::AudioProcessorEditor> base (p.createEditor());
+        base->setVisible (true);
+        HostAudio audio (p, 256, false, 4);
+
+        std::atomic<bool> quit { false };
+        std::atomic<int> loads { 0 }, last { -1 }, broken { 0 };
+        std::thread hostThread ([&]
+        {
+            juce::Random rng (5);
+            while (! quit.load())
+            {
+                const int which = rng.nextInt (4);
+                p.setStateInformation (states[(size_t) which].getData(), (int) states[(size_t) which].getSize());
+                last = which;
+                ++loads;
+                juce::MemoryBlock out;
+                p.getStateInformation (out);                            // must describe the state just loaded, even before the UI caught up
+                if (auto xml = juce::AudioProcessor::getXmlFromBinary (out.getData(), (int) out.getSize()))
+                {
+                    auto* node = xml->getChildByName ("PRESET");
+                    if (node == nullptr || node->getStringAttribute ("name") != names[which] || xml->getIntAttribute ("uiTheme", -1) != which) ++broken;
+                }
+                else ++broken;
+                std::this_thread::sleep_for (std::chrono::milliseconds (3));
+            }
+        });
+        for (int i = 0; i < 60; ++i) pump (25);
+        quit = true;
+        hostThread.join();
+        pump (400);
+
+        t.check (loads.load() > 50, "host thread loaded " + juce::String (loads.load()) + " states");
+        t.check (broken.load() == 0, "getStateInformation right after an off-thread setStateInformation returns that state (" + juce::String (broken.load()) + " wrong)");
+        t.check (pm.currentName() == names[last.load()], "once the message thread caught up, the preset manager shows the last loaded state");
+        t.check (gui::currentThemeIndex() == last.load(), "the open editor followed the state's theme");
+        juce::String diff;
+        bool same = true;
+        const auto xml = juce::AudioProcessor::getXmlFromBinary (states[(size_t) last.load()].getData(), (int) states[(size_t) last.load()].getSize());
+        if (xml != nullptr)
+            for (auto* e : xml->getChildWithTagNameIterator ("PARAM"))
+                if (const int idx = paramIndex (e->getStringAttribute ("id")); idx >= 0)
+                    same = same && std::abs ((float) e->getDoubleAttribute ("value") - p.state().getRawParameterValue (pid (idx))->load()) < 1.0e-4f * juce::jmax (1.0f, std::abs ((float) e->getDoubleAttribute ("value")));
+        t.check (same, "parameters hold the last loaded state");
+        base.reset();
+        audio.report (t, "off-thread state");
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("several instances at once");
+    {
+        std::vector<std::unique_ptr<WhyshoSynthAudioProcessor>> procs;
+        std::vector<std::unique_ptr<HostAudio>> audios;
+        std::vector<std::unique_ptr<juce::AudioProcessorEditor>> editors;
+        for (int i = 0; i < 4; ++i)
+        {
+            procs.push_back (std::make_unique<WhyshoSynthAudioProcessor>());
+            prepare (*procs.back(), i % 2 == 0 ? 44100.0 : 96000.0, 64 << i);
+            procs.back()->uiState().theme = i + 1;
+            audios.push_back (std::make_unique<HostAudio> (*procs.back(), 64 << i, i % 2 == 1, 10 + i));
+            editors.emplace_back (procs.back()->createEditor());
+            editors.back()->setVisible (true);
+        }
+        int flips = 0, lastTheme = gui::currentThemeIndex();
+        for (int i = 0; i < 40; ++i)
+        {
+            pump (25);
+            if (gui::currentThemeIndex() != lastTheme) { ++flips; lastTheme = gui::currentThemeIndex(); }
+            procs[(size_t) (i % 4)]->presetManager().load (0, i);
+            if (i == 20) { editors[1].reset(); editors[1].reset (procs[1]->createEditor()); editors[1]->setVisible (true); }
+        }
+        t.check (flips <= 1, "four open editors with four different saved themes settle on one (" + juce::String (flips) + " changes)");
+        bool kept = true;
+        for (int i = 0; i < 4; ++i) kept = kept && procs[(size_t) i]->uiState().theme.load() == i + 1;
+        t.check (kept, "each instance kept its own saved theme");
+        // a favourite set in one instance is seen by the others (shared library on disk)
+        procs[0]->presetManager().setFavourite (0, 1, true);
+        procs[2]->presetManager().rescan();
+        t.check (procs[2]->presetManager().isFavourite (0, 1), "library changes are shared between instances");
+        procs[0]->presetManager().setFavourite (0, 1, false);
+        // hosts destroy in any order: editor first, then the processor, others keep running
+        editors[2].reset(); audios[2]->report (t, "instance 3"); audios[2].reset(); procs[2].reset();
+        pump (100);
+        editors.clear();
+        for (int i = 0; i < 4; ++i) if (audios[(size_t) i] != nullptr) audios[(size_t) i]->report (t, "instance " + juce::String (i + 1));
+        audios.clear();
+        procs.clear();
+        pump (50);
+    }
+
+    // -----------------------------------------------------------------------
+    t.begin ("instance created and destroyed on another thread (plugin scan)");
+    {
+        std::atomic<bool> done { false };
+        std::atomic<int> ok { 0 };
+        std::thread scanner ([&]
+        {
+            for (int i = 0; i < 6; ++i)
+            {
+                WhyshoSynthAudioProcessor p;
+                prepare (p, 48000.0, 128);
+                juce::AudioBuffer<float> buf (2, 128);
+                juce::MidiBuffer midi;
+                midi.addEvent (juce::MidiMessage::noteOn (1, 60, 0.8f), 0);
+                p.processBlock (buf, midi);
+                juce::MemoryBlock mb;
+                p.getStateInformation (mb);
+                p.setStateInformation (mb.getData(), (int) mb.getSize());
+                if (mb.getSize() > 100 && p.getParameters().size() == kNumParams) ++ok;
+            }
+            done = true;
+        });
+        while (! done.load()) pump (20);
+        scanner.join();
+        pump (100);
+        t.check (ok.load() == 6, "six instances lived and died on a worker thread");
+    }
+
+    std::cout << "\nhost: " << t.checks << " checks, " << t.failures << " failed\n";
     return juce::jmin (t.failures, 100);
 }
 } // namespace
@@ -1729,6 +2234,7 @@ int main (int argc, char** argv)
     juce::ScopedJuceInitialiser_GUI gui;
     if (argc > 1 && juce::String (argv[1]) == "--stress") return stress();
     if (argc > 1 && juce::String (argv[1]) == "--interact") return interact();
+    if (argc > 1 && juce::String (argv[1]) == "--host") return hostHarness();
     const juce::File dir (argc > 1 ? juce::String (argv[1]) : juce::File::getCurrentWorkingDirectory().getFullPathName());
     const float scale = argc > 2 ? juce::String (argv[2]).getFloatValue() : 1.0f;
     dir.createDirectory();

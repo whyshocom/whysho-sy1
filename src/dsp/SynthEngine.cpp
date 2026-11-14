@@ -55,7 +55,12 @@
 //      note on release); non-overlapping notes retrigger and start on pitch.
 //      Poly: each new note glides from the previously played note.
 //    * velocity gain = 1 - vel_sens × (1 - (vel/127)²).
-//    * LFO retrigger off = every voice follows one free-running global phase.
+//    * LFO retrigger off = every voice follows one shared phase. Free-running,
+//      except tempo-synced LFOs while the host plays: those are locked to the
+//      song position (phase = frac (ppq / division)) via setTransport().
+//    * Level modulation is slewed per sample (4-pole, ≈ 2 ms edge, ≈ 1.5 ms
+//      lag) and Pan modulation over ≈ 1.2 ms, so square / S&H / saw LFOs gate
+//      without clicking; other destinations ramp over one control period.
 //      Saw LFO falls +1 → -1; Square starts high; S&H draws a new value per cycle.
 //
 //  Levels: one default note at velocity 100 peaks ≈ -12 dBFS. The master stage
@@ -92,6 +97,9 @@ struct SynthEngine::Impl
     bool   discrete[kNumParams] {};
     float  p[kNumParams] {}, lastP[kNumParams] {};
     double bpm = 120.0, lastBpm = -1.0;
+    double transportPpq = 0.0;
+    bool   transportPlaying = false, transportFresh = false;
+    float  lfoSyncBeats[kNumLfos] {};      // > 0: tempo-synced with retrigger off → lockable to the transport
     bool   derivedValid = false;
 
     // ---- voices
@@ -148,6 +156,8 @@ struct SynthEngine::Impl
         const float fs = (float) sampleRate;
         sh.sr = fs; sh.invSr = 1.0f / fs; sh.ctrlDt = (float) kCtrl / fs;
         smoothCoef = 1.0f - std::exp (-(float) kCtrl / (0.006f * fs));     // 6 ms
+        sh.slewCoef = 1.0f - std::exp (-sh.ctrlDt / 0.0006f);              // 2 × 0.6 ms
+        sh.levelCoef = 1.0f - std::exp (-1.0f / (0.0004f * fs));           // 4 × 0.4 ms
         drive.prepare (sampleRate); chorus.prepare (sampleRate);
         delay.prepare (sampleRate); reverb.prepare (sampleRate); master.prepare (sampleRate);
         const auto cap = (size_t) juce::jmax (16, maxBlock);
@@ -217,6 +227,8 @@ struct SynthEngine::Impl
             const float* b = p + l * kLfoStride;
             sh.lfoWave[l] = (int) pv (b, P::lfo1Wave);
             sh.lfoRetrig[l] = pv (b, P::lfo1Retrig) > 0.5f;
+            lfoSyncBeats[l] = (pv (b, P::lfo1Sync) > 0.5f && ! sh.lfoRetrig[l])
+                                ? kDivBeats[juce::jlimit (0, kNumDivs - 1, (int) pv (b, P::lfo1Div))] : 0.0f;
             sh.lfoRate[l] = pv (b, P::lfo1Sync) > 0.5f
                               ? (float) (bpm / 60.0) / kDivBeats[juce::jlimit (0, kNumDivs - 1, (int) pv (b, P::lfo1Div))]
                               : pv (b, P::lfo1Rate);
@@ -507,6 +519,20 @@ struct SynthEngine::Impl
         if (! prepared || numCh < 1) { out.clear(); return; }
 
         readParams (values, hostBpm);
+
+        // Bar-lock synced, non-retriggered LFOs to the song position. Only on a
+        // fresh report while playing: otherwise they simply keep running.
+        if (transportFresh && transportPlaying && std::isfinite (transportPpq))
+            for (int l = 0; l < kNumLfos; ++l)
+                if (lfoSyncBeats[l] > 0.0f)
+                {
+                    const double cycles = transportPpq / (double) lfoSyncBeats[l];
+                    const double whole = std::floor (cycles);
+                    sh.lfoGlobalPhase[l] = juce::jlimit (0.0f, 0.99999994f, (float) (cycles - whole));
+                    sh.lfoGlobalCycle[l] = (uint32_t) (int64_t) std::fmod (whole, 4294967296.0);
+                }
+        transportFresh = false;
+
         auto it = midi.begin();
         const auto end = midi.end();
 
@@ -551,6 +577,13 @@ void SynthEngine::process (juce::AudioBuffer<float>& out, const juce::MidiBuffer
                            const float* values, double bpm)
 {
     impl->process (out, midi, values, bpm);
+}
+
+void SynthEngine::setTransport (double ppqPosition, bool isPlaying) noexcept
+{
+    impl->transportPpq = ppqPosition;
+    impl->transportPlaying = isPlaying;
+    impl->transportFresh = true;
 }
 
 int SynthEngine::activeVoices() const noexcept { return impl->activeCount.load (std::memory_order_relaxed); }
