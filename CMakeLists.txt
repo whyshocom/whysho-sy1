@@ -44,6 +44,9 @@ FetchContent_MakeAvailable(monocypher)
 add_library(monocypher STATIC
     ${monocypher_SOURCE_DIR}/src/monocypher.c
     ${monocypher_SOURCE_DIR}/src/optional/monocypher-ed25519.c)
+# Keep crypto_* symbols out of the plugin's exports (another plugin in the same
+# host may embed a different Monocypher).
+set_target_properties(monocypher PROPERTIES C_VISIBILITY_PRESET hidden)
 target_include_directories(monocypher PUBLIC
     ${monocypher_SOURCE_DIR}/src
     ${monocypher_SOURCE_DIR}/src/optional)

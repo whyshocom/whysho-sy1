@@ -7,6 +7,8 @@ Built on [JUCE](https://juce.com) (C++), shipping as **VST3** (Windows + macOS),
 
 ![status](https://img.shields.io/badge/stage-alpha-orange) ![formats](https://img.shields.io/badge/formats-VST3%20%7C%20AU-blue)
 
+![SY1 — Paper theme](docs/screenshots/sy1-main-paper.png)
+
 ---
 
 ## Features
@@ -82,6 +84,10 @@ build/WhyshoSY1_Render_artefacts/Release/WhyshoSY1_Render --preset "Factory/Long
 
 # UI screenshots in every theme (Linux: run under xvfb-run)
 build/WhyshoSY1_Snapshot_artefacts/Release/WhyshoSY1_Snapshot shots/
+
+# UI interaction tests / host-lifecycle harness (each with a fresh HOME)
+build/WhyshoSY1_Snapshot_artefacts/Release/WhyshoSY1_Snapshot --interact
+build/WhyshoSY1_Snapshot_artefacts/Release/WhyshoSY1_Snapshot --host
 ```
 
 ## Adding things

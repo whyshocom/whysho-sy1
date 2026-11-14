@@ -1355,10 +1355,12 @@ int interact()
         // one good, one bad
         const auto presetFile = scratch.getChildFile ("one.sy1preset");
         const int userBefore = (int) pm.bank (1).presets.size();
+        br.setSearch ("lead");                                  // importing while a search is typed clears the search...
         br.importFiles ({ presetFile, garbage });
         Ui::pump (300);
         v = br.viewState();
-        t.check ((int) pm.bank (1).presets.size() == userBefore + 1 && v.messageIsError && v.message.startsWith ("Imported 1, but"), "mixed import: the good file lands, the bad one is reported");
+        t.check ((int) pm.bank (1).presets.size() == userBefore + 1 && v.messageIsError && v.message.startsWith ("Imported 1, but"),
+                 "mixed import with a search typed: the good file lands, the bad one is reported, and the message stays (\"" + v.message + "\")");
 
         // ---- drag and drop ----
         t.begin ("drag and drop");
