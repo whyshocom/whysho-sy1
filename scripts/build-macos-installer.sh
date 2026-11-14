@@ -166,9 +166,9 @@ pkgbuild --root "${STAGE_AU}" \
 cp "${REPO_ROOT}/packaging/EULA.txt"          "${RESOURCES_DIR}/license.txt"
 cp "${REPO_ROOT}/packaging/macos/welcome.html"    "${RESOURCES_DIR}/welcome.html"
 cp "${REPO_ROOT}/packaging/macos/conclusion.html" "${RESOURCES_DIR}/conclusion.html"
-# Optional background image (ignored if absent).
-[[ -f "${REPO_ROOT}/packaging/macos/background.png" ]] && \
-    cp "${REPO_ROOT}/packaging/macos/background.png" "${RESOURCES_DIR}/background.png"
+# Brand backdrop, light and dark (referenced by distribution.xml).
+cp "${REPO_ROOT}/packaging/macos/background.png"      "${RESOURCES_DIR}/background.png"
+cp "${REPO_ROOT}/packaging/macos/background-dark.png" "${RESOURCES_DIR}/background-dark.png"
 
 DIST_XML="${WORK_DIR}/distribution.xml"
 sed "s/__VERSION__/${VERSION}/g" \

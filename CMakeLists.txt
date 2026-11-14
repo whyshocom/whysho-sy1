@@ -54,6 +54,7 @@ target_include_directories(monocypher PUBLIC
 # ---------------------------------------------------------------------------
 juce_add_plugin(WhyshoSY1
     COMPANY_NAME                "whysho"
+    ICON_BIG                    "${CMAKE_CURRENT_SOURCE_DIR}/packaging/icon.png"
     COMPANY_WEBSITE             "https://whysho.com"
     BUNDLE_ID                   "com.whysho.sy1"
     PLUGIN_MANUFACTURER_CODE    Wsho
