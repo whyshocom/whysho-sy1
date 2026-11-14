@@ -874,7 +874,7 @@ void testModulation (TestRun& t)
         int edge = -1;
         for (int i = 0; i < a.size() && edge < 0; ++i) if (std::abs (a.l[(size_t) i]) > 0.05 * hi) edge = i;
         t.check (diff < 1.0e-6 && hi > 0.1, "transport lock: same song position = identical render, whatever happened before", "max diff " + juce::String (diff, 9));
-        t.check (std::abs (edge / 48000.0 - 0.25) < 0.004 && peakOf (a, 0.8, 0.95) < 0.01 * hi, "transport lock: gate edges land on the beat",
+        t.check (std::abs (edge / 48000.0 - 0.25) < 0.004 && peakOf (a, 0.55, 0.7) < 0.01 * hi && peakOf (a, 0.8, 0.95) > 0.9 * hi, "transport lock: gate edges land on the beat",
                  "started at ppq 0.5, first edge at " + num (edge / 48.0, 2) + " ms (beat = 250 ms)");
         t.check (peakOf (stopped, 0.05, 0.2) > 0.5 * hi && maxSecondDiff (a, 0.2, 0.3) < 0.01, "transport stopped: LFO free-runs; locked edge is click-free");
     }

@@ -51,7 +51,11 @@ void WhyshoSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     double bpm = 120.0;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
+        {
             if (auto b = pos->getBpm()) bpm = *b;
+            // bar-locks synced, non-retriggered LFOs to the host timeline
+            if (auto ppq = pos->getPpqPosition()) engine.setTransport (*ppq, pos->getIsPlaying());
+        }
 
     engine.process (buffer, midi, values.data(), bpm);
 
