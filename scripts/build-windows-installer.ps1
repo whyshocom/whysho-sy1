@@ -110,7 +110,9 @@ if ($env:WINDOWS_CERT_PFX_BASE64 -and $env:WINDOWS_CERT_PWD) {
         $SignToolArgs = @(
             'sign', '/fd', 'SHA256',
             '/f', $TempPfx, '/p', $env:WINDOWS_CERT_PWD,
-            '/tr', $timestamp, '/td', 'SHA256'
+            '/tr', $timestamp, '/td', 'SHA256',
+            # Name and link shown next to the publisher in the Windows UAC prompt.
+            '/d', 'whysho SY1', '/du', 'https://whysho.com'
         )
         Write-Host "==> Signing Standalone executable"
         & $signtool.Source @SignToolArgs "$StandaloneExe"
