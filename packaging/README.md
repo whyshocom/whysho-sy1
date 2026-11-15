@@ -99,8 +99,8 @@ git tag v1.4.0 && git push origin v1.4.0
 
 - **Triggers:** push to `main` or `claude/**`, push of a `v*` tag, or manual
   `workflow_dispatch`.
-- **Matrix:** `windows-latest` and a **self-hosted macOS** runner (builds
-  universal2). The macOS leg is `continue-on-error`, so a missing runner never
+- **Matrix:** `windows-latest` and a GitHub-hosted **`macos-15`** runner (builds
+  universal2). The macOS leg is `continue-on-error`, so a failing macOS build never
   blocks the Windows installer or the release.
 - **Steps:** checkout (full history for tags) → resolve version → restore the
   CPM/FetchContent dependency cache → cmake configure + build Release → install

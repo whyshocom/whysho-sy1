@@ -33,10 +33,10 @@ jobs:
         include:
           - os: windows-latest
             name: windows
-          # Self-hosted macOS runner (your Mac) — GitHub-hosted macOS runners
-          # are gated on this account. Builds a universal x86_64+arm64 binary.
-          # Revert to `os: macos-13` once hosted macOS is available.
-          - os: [self-hosted, macOS]
+          # GitHub-hosted macOS runner (free for public repositories). Builds a
+          # universal x86_64+arm64 binary. For a self-hosted Mac instead, use
+          # `os: [self-hosted, macOS]`.
+          - os: macos-15
             name: macos
 
     env:
